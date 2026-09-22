@@ -105,8 +105,13 @@ diagnostics, so the model sees exactly what Typst saw.
 | `cetz-diagrams` | You need to draw something (2D or 3D) in Typst |
 | `typst-documents` | Writing, laying out, or debugging a `.typ` document |
 
-`cetz-diagrams` ships `references/cetz-api.md`, a condensed CeTZ 0.5.2 API with
-verified signatures, recipes, and pitfalls. `typst-documents` routes to a
+`cetz-diagrams` ships a one-shot documentation set: `references/cetz-recipes.md`
+(14 complete figures to copy), `references/cetz-failure-modes.md` (verbatim
+errors → cause → fix, plus silent visual failures),
+`references/diagram-layout.md` (measured text widths and spacing rules), and
+`references/cetz-api.md` (signatures, per-element style keys, anchors). Every
+complete ` ```typst ` example in the skills is compiled by the selftest, so the
+documentation cannot rot. `typst-documents` routes to a
 vendored copy of the MIT-licensed
 [claude-skill-typst](https://github.com/lucifer1004/claude-skill-typst)
 reference set (see `THIRD_PARTY_NOTICES.md`).

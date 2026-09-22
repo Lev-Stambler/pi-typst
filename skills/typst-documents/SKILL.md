@@ -43,7 +43,9 @@ Body text with *bold*, _emphasis_, `code`, and math $E = m c^2$.
 == Section
 
 - Lists use a dash, not an asterisk.
-- References look like @fig:block.
+
+#figure(rect(width: 1cm, height: 1cm), caption: [A labeled figure.]) <fig:block>
+See @fig:block for the reference syntax.
 ```
 
 ## Structure for explainers and reports

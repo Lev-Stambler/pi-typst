@@ -1,38 +1,45 @@
 # CeTZ 0.5.2 API reference
 
 Condensed from the CeTZ 0.5.2 source and manual (LGPL-3.0-or-later,
-<https://github.com/cetz-package/cetz>). Signatures are exact; descriptions are
-paraphrased. For the full manual see <https://cetz-package.github.io/docs> or
-`manual.pdf` in the CeTZ repository.
+<https://github.com/cetz-package/cetz>); see [NOTICE.md](NOTICE.md) for
+provenance. Signatures, style keys with defaults, and anchor names are exact.
+For the narrative manual see <https://cetz-package.github.io/docs> or
+`manual.pdf` in the CeTZ repository. Runnable versions of most patterns:
+[cetz-recipes.md](cetz-recipes.md). Error catalog:
+[cetz-failure-modes.md](cetz-failure-modes.md).
 
-## Imports
+## Imports and module hygiene
 
-```typst
-#import "@preview/cetz:0.5.2": canvas, draw            // core
-#import "@preview/cetz:0.5.2": canvas, draw, tree      // + libraries
+```typ
+#import "@preview/cetz:0.5.2": canvas, draw                 // core
+#import "@preview/cetz:0.5.2": canvas, draw, tree           // + libraries
 #import "@preview/cetz:0.5.2": canvas, draw, angle, decorations, palette
 #import "@preview/cetz:0.5.2": canvas, draw, vector, matrix, coordinate, intersection
 ```
 
-Inside a canvas body: `import draw: *` brings all draw functions into scope.
+Inside a canvas body: `import draw: *` brings the draw functions into scope.
 Libraries stay namespaced: `tree.tree(...)`, `angle.angle(...)`,
 `decorations.brace(...)`, `palette.new(...)`.
 
-Plotting is **not** part of CeTZ 0.5. It lives in the separate `cetz-plot`
-package: `#import "@preview/cetz-plot:0.1.3": plot`.
+**Every module and every nested scope that draws needs both imports.** Without
+them, names resolve to Typst built-ins and the errors point at arguments
+(`unexpected argument`, `unknown variable: dbeafe`) rather than at the missing
+import. See failure-mode #3.
+
+Plotting is not part of CeTZ 0.5: `#import "@preview/cetz-plot:0.1.3": plot`.
 
 ## Canvas
 
-```typst
+```typ
 canvas(length: 1cm, x: 1.0, y: 1.0, z: 1.0, baseline: none, debug: false,
        background: none, stroke: none, padding: none, body)
 ```
 
-- `length` maps one coordinate unit to a physical length. Ratios are **not**
-  accepted; wrap in `layout(size => canvas(length: size.width * ratio, ...))`.
-- `debug: true` draws every element's bounding box, which is the fastest way to
-  find what is eating space.
-- Wrap in `figure(canvas(...), caption: [...])` to get numbering and refs.
+- `length` maps one coordinate unit to a physical length. Ratios are rejected;
+  wrap in `layout(size => canvas(length: size.width * ratio, ...))`.
+- `debug: true` outlines every element's bounding box — fastest way to find what
+  eats space.
+- Wrap in `figure(canvas(...), caption: [...])` for numbering and refs.
 
 ## Coordinates
 
@@ -41,160 +48,183 @@ canvas(length: 1cm, x: 1.0, y: 1.0, z: 1.0, baseline: none, debug: false,
 | `(1.5, 2)` | x, y (z defaults to 0) |
 | `(1, 2, 3)` | x, y, z |
 | `(x: 1, y: 2, z: 3)` | named components; omitted components keep the previous value |
-| `(rel: (0.5, 0.5))` | relative to the current position; `to:` and `update:` override the base |
+| `(rel: (0.5, 0.5))` | relative to the current position (`to:`, `update:` override the base) |
 | `(angle: 45deg, radius: 1.5)` | polar, relative to the current position |
-| `"name"` or `(name: "a", anchor: "north")` | an element's default anchor |
-| `"name.south-east"` | a named anchor |
-| `(name: "line", anchor: 50%)` | a path anchor, relative distance along the path |
-| `(name: "circle", anchor: 30deg)` | a border anchor at an angle |
+| `"name"` / `(name: "a", anchor: "north")` | an element's default anchor |
+| `"name.south-east"` | named anchor |
+| `(name: "line", anchor: 50%)` | path anchor by relative distance |
+| `(name: "circle", anchor: 30deg)` | border anchor by angle |
 | `("a", 50%, "b")` | linear interpolation between two coordinates |
-| `()` | the current position (updated by shapes and `move-to`) |
-| `(element: "b", point: "a", solution: 0)` | intersection point of a ray with an element |
-| `(horizontal: "a", vertical: "b")` | combine x of one coordinate with y of another |
+| `()` | current position (updated by shapes and `move-to`) |
+| `(element: "b", point: "a", solution: 0)` | intersection of a ray with an element |
+| `(horizontal: "a", vertical: "b")` | x from one coordinate, y from another |
+| `(rel: (1, 0), to: "a")` | relative to a named element instead of the cursor |
 
-`move-to((x, y))` sets the current position; `set-origin((x, y))` moves the
-coordinate origin for everything after it.
+`move-to(pt)` sets the current position; `set-origin(coord)` moves the origin
+for everything after it. Distances in path anchors can be absolute
+(`50pt`, `0.5`) or relative (`50%`).
 
-## Shapes
+## Draw functions
 
-```typst
-line(..points-style, close: false, name: none)
-circle(..points-style, name: none, anchor: none)          // style: radius: number | (rx, ry)
-circle-through(a, b, c, name: none, anchor: none, ..style)
-arc(position, start: auto, stop: auto, delta: auto, name: none, anchor: none, ..style)
-arc-through(a, b, c, name: none, ..style)
-rect(a, b, name: none, anchor: none, ..style)             // style: radius: number | ratio | dict
-rect-around(..points-style, ignore-marks: false, ignore-hidden: false, ignore-floating: false, ignore-shapes: false)
-grid(from, to, name: none, ..style)                       // style: step, shift, help-lines
-content(..args-style, angle: 0deg, anchor: none, name: none)
-bezier(start, end, ..ctrl-style, name: none)              // ctrl points come after start, end
-bezier-through(start, pass-through, end, name: none, ..style)
-catmull(..points-style, close: false, name: none)         // style: tension
-hobby(..points-style, ta: auto, tb: auto, close: false, name: none)
-polygon(origin, sides, angle: 0deg, name: none, anchor: none, ..style)
-n-star(origin, sides, angle: 0deg, name: none, anchor: none, ..style)   // style: inner-radius, show-inner
-mark(from, to, ..style)                                   // to: coordinate or angle
-svg-path(name: none, anchor: none, ..commands-style)       // ("m"|"l"|"h"|"v"|"c"|"q"|"z"|"anchor", ...)
-merge-path(body, join: true, ignore-marks: true, ignore-hidden: true, close: false, name: none, ..style)
-compound-path(body, name: none, ..style)                   // sub-paths, supports holes with fill-rule
-boolean(a, b, op: "difference", fill-rule-a: auto, fill-rule-b: auto, ..style)  // union/intersection/difference/xor
-```
+`style` below lists keys accepted by that element (defaults in parentheses).
+Elements without a note support the shared `stroke`, `fill`, `fill-rule`
+styling.
 
-Key points:
+| Function | Signature | Style keys | Anchors |
+| --- | --- | --- | --- |
+| `line` | `line(..pts-style, close: false, name: none)` | shared + mark | `start`, `mid`, `end`, `50%`, `centroid` (closed) |
+| `circle` | `circle(..points-style, name: none, anchor: none)` | `radius` (1) number or `(rx, ry)` | border, path, `center` |
+| `circle-through` | `circle-through(a, b, c, name: none, anchor: none, ..style)` | shared | `a`, `b`, `c`, border |
+| `arc` | `arc(position, start: auto, stop: auto, delta: auto, name: none, anchor: none, ..style)` | `radius` (1), `mode` (`"OPEN"`/`"CLOSE"`/`"PIE"`), `update-position` (true) | `arc-start`, `arc-end`, `arc-center`, `center`, `chord-center`, `origin` |
+| `arc-through` | `arc-through(a, b, c, name: none, ..style)` | as `arc` | as `arc` |
+| `rect` | `rect(a, b, name: none, anchor: none, ..style)` | `radius` (0) number/ratio/dict per corner | border, path, `center` |
+| `rect-around` | `rect-around(..pts-style, ignore-marks: false, ignore-hidden: false, ignore-floating: false, ignore-shapes: false)` | `padding` + `rect` keys | as `rect` |
+| `grid` | `grid(from, to, name: none, ..style)` | `step` (1) number/array/dict, `shift` (0), `help-lines` (false) | border |
+| `content` | `content(..args-style, angle: 0deg, anchor: none, name: none)` | `padding` (0), `frame` (`none`/`"rect"`/`"circle"`), `auto-scale` (false), `wrap` (none) | `mid`, `mid-east`, `mid-west`, `base`, `base-east`, `base-west`, `text`, border |
+| `bezier` | `bezier(start, end, ..ctrl-style, name: none)` | shared + mark | `ctrl-n` (0-based), path |
+| `bezier-through` | `bezier-through(start, pass-through, end, name: none, ..style)` | as `bezier` | as `bezier` |
+| `catmull` | `catmull(..pts-style, close: false, name: none)` | `tension` (0.5) | `pt-n`, `start`/`mid`/`end` |
+| `hobby` | `hobby(..pts-style, ta: auto, tb: auto, close: false, name: none)` | `omega` ((1, 1)) | `pt-n`, `start`/`mid`/`end` |
+| `polygon` | `polygon(origin, sides, angle: 0deg, name: none, anchor: none, ..style)` | `radius` (1) | border, `center` |
+| `n-star` | `n-star(origin, sides, angle: 0deg, name: none, anchor: none, ..style)` | `radius`, `inner-radius`, `show-inner` (false) | border, `center` |
+| `mark` | `mark(from, to, ..style)` | mark keys; a positional symbol string is allowed | — |
+| `svg-path` | `svg-path(name: none, anchor: none, ..commands-style)` | shared | `"anchor"` commands |
+| `merge-path` | `merge-path(body, join: true, ignore-marks: true, ignore-hidden: true, close: false, name: none, ..style)` | shared + mark | `centroid` (closed) |
+| `compound-path` | `compound-path(body, name: none, ..style)` | `fill-rule` | `centroid` (closed) |
+| `boolean` | `boolean(a, b, op: "difference", fill-rule-a: auto, fill-rule-b: auto, ..style)` | `union`/`intersection`/`difference`/`xor` | as path |
 
-- `line` accepts more than two points (a strip) and `close: true` to make a
-  polygon. If the first or last coordinate is an element *name*, the line is
-  shortened to the border intersection, so `line("a", "b")` connects two boxes
-  cleanly.
-- `bezier(start, end, ctrl1, ctrl2)` is cubic with two control points;
-  `bezier(start, end, ctrl)` is quadratic. Control points come *after* the
-  endpoints.
-- `content` places untransformed Typst content. Two coordinates make a
-  rectangle to fill (text box). `angle:` rotates it; a coordinate rotates it to
-  point at that coordinate. `frame: "rect" | "circle"` and `padding` come from
-  content styling.
-- `arc` needs exactly two of `start`, `stop`, `delta`; `mode:` is
-  `"OPEN" | "CLOSE" | "PIE"`.
+Details that change the code you write:
+
+- `line` accepts a point list (`line((0,0), (1,1), (2,0))`), `close: true` to
+  close a strip into a polygon, and element **names** as endpoints
+  (`line("a", "b")` shortens to the border intersection).
+- `bezier(start, end, ctrl1, ctrl2)` — endpoints first, then control points.
+  One control point makes it quadratic. Swapping endpoints and controls produces
+  curves that cross the figure.
+- `rect(a, b, rel: (w, h))` sizes a box relative to `a`; `radius` accepts a
+  dictionary keyed by `north`, `east`, `south`, `west`, the four diagonals, or
+  `rest`.
+- `content` with **two coordinates** fills the rectangle between them; two
+  positional *content* values are a mistake (see failure-mode #4).
+- `arc` needs exactly two of `start`, `stop`, `delta`.
+- `svg-path` commands: `("m"|"l", coord)`, `("h"|"v", number)`,
+  `("c", ctrl-a, ctrl-b, coord)`, `("q", ctrl, coord)`, `("z",)`,
+  `("anchor", "name", coord)`.
+- `intersections(name, ..elements)` creates `name.0`, `name.1`, …; pass element
+  *names* to intersect without drawing them again; wrap in `hide()` to use them
+  only for anchors.
 
 ## Styling
 
-```typst
-set-style(..style)          // set for everything after this point
-fill(color)                 // shorthand for set-style(fill: ...)
-stroke(stroke)              // shorthand for set-style(stroke: ...)
+```typ
+set-style(..style)   // forward-applying, like Typst's `set`
+fill(color)          // shorthand for set-style(fill: ...)
+stroke(stroke)       // shorthand for set-style(stroke: ...)
 ```
 
-Style values cascade: function argument > element-type entry > global. A
-dictionary value *merges* with the parent dictionary, a plain value replaces it.
+Precedence: function argument > element-type entry > global. Dictionary values
+merge with the parent dictionary; plain values replace it.
 
-```typst
+```typ
 set-style(
   stroke: (paint: rgb("#18181b"), thickness: 0.7pt, dash: "dashed", cap: "round", join: "round"),
   fill: rgb("#dbeafe"),
   content: (padding: 0.2, frame: "rect"),
-  rect: (radius: 2pt),          // only rectangles
+  rect: (radius: 2pt),
   mark: (end: ">", fill: white),
 )
 ```
 
-Style roots are the element names: `line`, `rect`, `circle`, `arc`, `grid`,
-`content`, `polygon`, `n-star`, `group`, `mark`, `bezier`, ….
+Style roots are element names: `line`, `rect`, `circle`, `arc`, `grid`,
+`content`, `polygon`, `n-star`, `group`, `mark`, `bezier`, `angle`, `tree`,
+`brace`, …
+
+Colors: `.transparentize(ratio)`, `.lighten(ratio)`, `.darken(ratio)`,
+`color.mix((a, b), ratio: t)`. Typst's `+` / `*` on colors is an error.
 
 ### Marks
 
-Mark styling keys: `symbol`, `start`, `end`, `fill`, `stroke`, `scale`,
-`length`, `width`, `inset`, `slant`, `harpoon`, `flip`, `reverse`, `pos`,
-`offset`, `anchor` (`"tip"`, `"base"`, `"center"`), `shorten-to`.
+Mark keys: `symbol`, `start`, `end`, `fill`, `stroke`, `scale`, `length`,
+`width`, `inset`, `slant`, `harpoon`, `flip`, `reverse`, `pos`, `offset`,
+`anchor` (`"tip"`/`"base"`/`"center"`), `shorten-to`, `sep`, `xy-up`, `z-up`.
 
-Mnemonics: `>` (triangle), `<`, `<>` (diamond), `[]` (rect), `[`, `]`
-(bracket), `|` (bar), `o` (circle), `+`, `x`, `*` (star), `)>`
-(curved-stealth), `>>` (stealth), `)`. Named shapes: `triangle`, `stealth`,
-`curved-stealth`, `bar`, `diamond`, `rect`, `bracket`, `circle`, `plus`, `x`,
-`star`, `parenthesis`, `hook`. Register custom marks with `register-mark`.
+Mnemonics: `>` ` <` `<>` (diamond) `[]` (rect) `[` `]` (bracket) `|` (bar)
+`o` (circle) `+` `x` `*` (star) `)>` (curved-stealth) `>>` (stealth) `)`.
 
-```typst
+```typ
 line((0, 0), (2, 0), mark: (end: ">>", scale: 1.2, fill: rgb("#2563eb")))
 line((0, 0), (2, 0), mark: (start: "<", end: ">", pos: 0.5))
+mark((0, 0), (1, 1), ">>", scale: 2)      // the mark *shape* takes a positional symbol
 ```
+
+`register-mark(symbol, body, mnemonic: .., tip: .., base: .., center: ..,
+reverse-tip: .., reverse-base: .., reverse-center: ..)` adds custom marks.
 
 ## Groups, layers, intersections
 
-```typst
-group(body, name: none, anchor: none, ..style)   // scoped styling; owns its own anchors
-scope(body)                                      // scoped state without a new element
-anchor(name, position)                           // add a named anchor to the current group
-copy-anchors(element, filter: auto)
-on-layer(layer, body)                            // lower layers draw first
-hide(body, bounds: false)                        // drawn nowhere, still resolvable
-floating(body)                                   // drawn, but ignored for bounding boxes
+```typ
+group(body, name: none, anchor: none, ..style)     // scoped styling; own anchors
+scope(body)                                        // scoped state, no new element
+anchor(name, position)                             // add an anchor to the current group
+copy-anchors(element, filter: auto)                // inside a group only
+on-layer(layer, body)                              // lower layers draw first
+hide(body, bounds: false)                          // invisible, still resolvable
+floating(body)                                     // drawn, ignored for bounding boxes
 intersections(name, ..elements, samples: 10, sort: none, ignore-marks: true)
 for-each-anchor(name, callback, exclude: ())
 ```
 
-- Everything after `intersections("i", ...)` can use `"i.0"`, `"i.1"`, ….
-- `group(name: "g", ...)` exposes `"g.north-east"` and children as
-  `"g.child.anchor"`.
+- Out-of-sight/geometry helpers are cleanest as `hide(...)` + `intersections`.
+- A named group exposes `"g.north-east"` and its children as `"g.child.anchor"`.
+- Custom anchors (`anchor("x", (1, 1))`) are the tidiest way to attach several
+  arrows or braces to one logical point.
 
 ## Transformations
 
-```typst
-set-transform(mat)                       // none resets to identity
-transform(mat)
-rotate(45deg)                            // or rotate(x: .., y: .., z: ..) / yaw/pitch/roll
-translate(x: 1, y: 0.5, pre: false)      // or translate((1, 0.5))
-scale(50%)                               // or scale(x: .., y: .., z: ..)
+```typ
+set-transform(mat)                        // none resets to identity
+transform(mat)                            // multiply onto the current matrix
+rotate(45deg)                             // or rotate(x: .., y: .., z: ..) / yaw/pitch/roll
+translate(x: 1, y: 0.5, pre: false)       // or translate((1, 0.5))
+scale(50%)                                // or scale(x: .., y: .., z: ..)
 set-origin(coordinate)
 move-to(coordinate)
 set-viewport(from, to, bounds: (1, 1, 1))
+transform(matrix.transform-rotate-z(30deg))
 ```
 
-Scale and rotate do not resize text unless `content` styling sets
-`auto-scale: true`.
+`rotate` takes **one** positional angle or named axes; `scale` takes one value
+or named axes. Text does not scale unless `content` styling sets
+`auto-scale: true`. `matrix.*` helpers (`ident`, `transform-rotate-x/y/z`,
+`transform-scale`, `transform-translate`, `mul-mat`) build matrices;
+`vector.add/sub/len/dist/scale/div/neg/as-vec/as-mat` operate on vectors.
 
 ## 3D
 
-```typst
+```typ
 ortho(x: 35.264deg, y: 45deg, z: 0deg, sorted: true, cull-face: none,
       reset-transform: false, flatten: false, body)
 perspective(x: 35.264deg, y: 45deg, z: 0deg, distance: auto, sorted: true,
             cull-face: none, reset-transform: false, body)
-on-xy(z: 0, body)     // draw in the plane z = <z>
-on-xz(y: 0, body)     // draw in the plane y = <y>; body coordinates are (x, z)
-on-zy(x: 0, body)     // draw in the plane x = <x>; body coordinates are (z, y)
+on-xy(z: 0, body)     // plane z = <z>; body coordinates are (x, y)
+on-xz(y: 0, body)     // plane y = <y>; body coordinates are (x, z)
+on-zy(x: 0, body)     // plane x = <x>; body coordinates are (z, y)
 ```
 
-All three plane helpers apply a rotation, so **only** 2-component coordinates
-are meaningful inside them. Place 3D segments and content directly inside
-`ortho`. Labels must live inside the projection, otherwise their anchors refer
-to unprojected coordinates.
+`ortho` applies rotation then an orthographic projection; `perspective` adds
+perspective division. The three plane helpers *rotate the body*, so only
+2-component coordinates are meaningful inside them (a third component is
+accepted and effectively ignored — do not rely on it). 3D segments and labels go
+directly inside `ortho`; labels must be inside the projection or their anchors
+refer to unprojected coordinates.
 
-Conventional z-up scene that reads well:
+A scene that reads well (see recipe 12):
 
-```typst
+```typ
 ortho(x: 65deg, y: -35deg, {
-  on-xz({ grid((0,0), (1.6,1.6), step: 0.4); line((0,0),(1.9,0), mark: (end: ">")) })
-  on-xy({ line((0,0),(0,1.5), mark: (end: ">")) })          // vertical axis
-  line((0,0,0), (1.1, 0.7, 0.95), mark: (end: ">"))          // 3D vector
+  on-xz({ grid((0, 0), (1.6, 1.6), step: 0.4) })          // ground plane
+  on-xy({ line((0, 0), (0, 1.5), mark: (end: ">")) })      // vertical axis
+  line((0, 0, 0), (1.1, 0.7, 0.95), mark: (end: ">"))      // 3D vector
 })
 ```
 
@@ -202,31 +232,33 @@ ortho(x: 65deg, y: -35deg, {
 
 ### angle
 
-```typst
+```typ
 angle.angle(origin, a, b, direction: "ccw", label: none, name: none, ..style)
 angle.right-angle(origin, a, b, label: "•", name: none, ..style)
 ```
 
-`direction:` is `"ccw"`, `"cw"`, `"near"`, or `"far"`. Style keys: `radius`
-(number or ratio), `label-radius`. The `label` may be content or a function
-that receives the angle value.
+`direction`: `"ccw"`, `"cw"`, `"near"`, `"far"`. Style: `radius` (0.5 number or
+ratio), `label-radius` (50%). Anchors `a`, `b`. `label` may be content or a
+function receiving the angle value. Both functions normalise direction vectors,
+so collinear/identical points cause a divide-by-zero inside `vector.typ`.
 
 ### tree
 
-```typst
+```typ
 tree.tree(root, draw-node: auto, draw-edge: auto, direction: "down", grow: 1,
           spread: 1, name: none, node-layer: 0, edge-layer: 0, anchor: none,
           group-name-prefix: "node")
 ```
 
 `root` is a nested array: `([root], ([child], [leaf]), [sibling])`. Callbacks
-receive node dictionaries with `name`, `group-name`, `depth`, `n`, `content`.
-`draw-node` must draw at `(0, 0)` and return elements; `draw-edge(parent,
-child)` typically calls `line(parent.group-name, child.group-name)`.
+receive `name`, `group-name`, `depth`, `n`, `content`. `draw-node` must draw at
+`(0, 0)` (use an explicit `(0, 0)`, never `()`), and `draw-edge(parent, child)`
+usually calls `line(parent.group-name, child.group-name)`. Node anchors are
+`"0"`, `"0-0"`, `"0-1"`, … for direct positioning.
 
 ### decorations
 
-```typst
+```typ
 decorations.brace(start, end, name: none, ..style)
 decorations.flat-brace(start, end, flip: false, debug: false, name: none, ..style)
 decorations.zigzag(target, close: auto, name: none, ..style)
@@ -235,38 +267,35 @@ decorations.wave(target, close: auto, name: none, ..style)
 decorations.square(target, close: auto, name: none, ..style)
 ```
 
-Brace style keys: `amplitude`, `thickness`, `pointiness`, `taper`,
-`outer-inset`, `outer-curvyness`, `inner-outset`, `inner-curvyness`,
-`outer-thickness`, `content-offset`, `flip`. Path decorations accept
-`segments` or `segment-length`, `amplitude`, `start`, `stop` and a
-`factor`/`tension` depending on the effect.
+Brace keys: `amplitude` (0.25cm / 0.3 flat), `thickness` (0.015cm),
+`pointiness` (50%), `taper` (true), `outer-inset`, `outer-curvyness`,
+`inner-outset`, `inner-curvyness`, `outer-thickness` (0), `content-offset`
+(0.3), `flip`; flat braces add `aspect` (50%), `curves`, `outer-curves`.
+Path effects share `segments`/`segment-length`, `amplitude`, `start`, `stop`
+and take `factor` (zigzag 100%, coil 150%, square 50%) or `tension`
+(wave 0.5). They take a *drawable* (often `line(...)`) as `target`.
 
 ### palette
 
-```typst
+```typ
 palette.new(base: base-style, colors: (), dash: ())
 ```
 
-The returned function takes an index and returns a style dictionary:
-`set-style(..p(2))`, or `red.with(stroke: true)` for stroke-only palettes.
+Returns `p(i)` producing a style dictionary: `set-style(..p(2))`, or
+`red.with(stroke: true)` for stroke-only palettes.
 
-## Pitfalls
+## Pitfalls (quick list)
 
-1. `#import "@preview/cetz:0.5.2"` — always pin the version; CeTZ has breaking
-   changes between minor versions and moved `plot` out in 0.4.
-2. Colors do not support `rgb(...) + 50%`; use `.transparentize(50%)`,
-   `.lighten(20%)`, or `.darken(20%)`.
-3. `canvas(length: 1cm)` is mandatory for physical sizes; ratios are rejected.
-4. `bezier(start, end, ctrl...)` takes endpoints first. Swapping them produces
-   curves that cross the figure.
-5. User-defined functions that both call draw functions and return a value
-   (`x`) trigger "cannot join array with float". Compute coordinates in a pure
-   helper and draw in the loop.
-6. `content((), [...])` resolves to the *previous* coordinate. Use explicit
-   `(0, 0)` inside callbacks such as `draw-node`.
-7. Inside `ortho`, text and anchors must be placed inside the same projection.
-8. Two positional arguments to `content` are read as two *coordinates* (a
-   rectangle), not as coordinates plus content.
-9. `plot` is not in CeTZ 0.5 — import `cetz-plot` separately.
-10. Edges that connect named elements already shorten to the border
-    intersection; adding explicit anchor names is usually unnecessary.
+The full catalog with exact error messages is
+[cetz-failure-modes.md](cetz-failure-modes.md).
+
+1. Pin `@preview/cetz:0.5.2`; plotting lives in `cetz-plot`.
+2. No color arithmetic — use `.transparentize()` / `.lighten()`.
+3. `bezier(start, end, ctrl…)`: endpoints first.
+4. Helpers must either draw or compute, never both.
+5. `content()` takes one content value; callbacks use `(0, 0)`.
+6. Don't name parameters after Typst/CeTZ functions (`text`, `rect`, `line`, …).
+7. `mark:` is a dictionary; only `mark()` accepts a positional symbol.
+8. `canvas(length:)` needs a length, never a ratio.
+9. `rotate`/`scale` take one positional value or named axes.
+10. Text width ≈ `0.0165 × pt × chars` cm — size boxes from it.

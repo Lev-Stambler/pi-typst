@@ -1,93 +1,145 @@
 ---
 name: cetz-diagrams
-description: Draw diagrams in Typst with CeTZ 0.5.2 — canvas setup, coordinates and anchors, shapes, styling, groups, layers, intersections, trees, braces, and 3D projections — plus a render-and-inspect loop. Use when a concept needs a figure, schematic, flowchart, annotated diagram, matrix visualization, or 3D sketch inside a Typst document.
+description: Draw diagrams in Typst with CeTZ 0.5.2 — canvas setup, coordinates and anchors, shapes, styling, groups, layers, intersections, trees, braces, and 3D projections — plus a one-shot workflow with copy-paste recipes and a verified failure-mode catalog. Use when a concept needs a figure, schematic, flowchart, annotated diagram, matrix visualization, or 3D sketch inside a Typst document.
 ---
 
 # CeTZ diagrams
 
-CeTZ is the TikZ-like drawing package for Typst. It is a *coordinate* library:
-you place every element explicitly, which is exactly why it is good for
-explainers (the figure looks the way you intended) and why it needs a visual
-check after each edit.
+CeTZ places exactly what you ask for, so a good figure is arithmetic you can do
+before compiling. This skill is built to **one-shot** a figure: read the rules,
+copy the nearest recipe, run the pre-flight checklist, compile once, then spend
+at most one or two passes on layout.
 
-Full API details: [references/cetz-api.md](references/cetz-api.md).
-Runnable diagrams: the `examples/` directory of this package
-(`transformer-block.typ`, `attention-matrix.typ`, `pipeline-flow.typ`,
-`tree-diagram.typ`, `three-d-vectors.typ`).
+Reference files (read the one you need, not all of them):
+
+| File | Use it for |
+| --- | --- |
+| [references/cetz-recipes.md](references/cetz-recipes.md) | 14 complete figures to copy — pipelines, heatmaps, trees, flowcharts, 3D, comparison panels |
+| [references/cetz-failure-modes.md](references/cetz-failure-modes.md) | Exact error message → cause → fix, plus the silent visual failures |
+| [references/diagram-layout.md](references/diagram-layout.md) | Measured text widths, spacing numbers, colour/legibility rules |
+| [references/cetz-api.md](references/cetz-api.md) | Full signatures, per-element style keys and anchors, coordinate forms |
+
+The ` ```typst ` blocks in those files (and in this one) are complete documents
+compiled by `npm run selftest`, so they are known-good starting points.
+
+## One-shot protocol
+
+1. **Classify the figure** and open the matching recipe: spine/pipeline →
+   recipe 1; bypass → 2; phases → 3; matrix/heatmap → 4; bars → 5; timeline → 6;
+   hierarchy → 7; flowchart → 8; states → 9; geometry → 10; layers → 11;
+   3D → 12; comparison → 13; annotated formula → 14.
+2. **Set the canvas and the spine.** One x for the spine, one stage height, one
+   gap. Sizes come from the text: `box width ≥ 0.0165 × pt × chars cm` (19 chars
+   at 10pt ≈ 3.1cm of text — add 25%).
+3. **Write the whole figure** using named elements for anything that two
+   coordinates refer to (`name: "a"`, then `line("a.east", "b.west")`).
+4. **Run the pre-flight checklist below** — it catches every error class in the
+   catalog without a compiler round-trip.
+5. **Compile** with `typst_compile` (`format: "pdf"`, `preview: "first"`) and
+   look at the returned page image. Fix syntax first (one line, recompile),
+   then geometry.
+6. **Layout pass.** Check for label/box overflow, curves crossing shapes,
+   reserved legend space, grayscale readability. One or two passes is the
+   budget; needing more means step 2 or 4 was skipped.
+7. **Hand over**: export the PDF, start `typst_preview` when the user wants to
+   read it live.
 
 ## Setup
 
 ```typst
 #import "@preview/cetz:0.5.2": canvas, draw
 
+#set page(width: 12cm, height: auto, margin: 1cm)
+
 #figure(
   canvas(length: 1cm, {
     import draw: *
-    set-style(stroke: (paint: rgb("#18181b"), thickness: 0.7pt), fill: none)
+    set-style(stroke: (paint: rgb("#18181b"), thickness: 0.7pt), fill: none,
+      content: (padding: 0.2))
 
-    rect((0, 0), (2, 1), radius: 2pt, fill: rgb("#dbeafe"))
-    content((1, 0.5), [block], anchor: "center")
-    line((1, 1), (1, 1.6), mark: (end: ">"))
+    rect((0, 0), (3.4, 0.62), radius: 2pt, fill: rgb("#dbeafe"))
+    content((1.7, 0.31), [one block], anchor: "center")
+    line((1.7, 0.62), (1.7, 1.12), mark: (end: ">"))
+    content((1.7, 1.22), [next], anchor: "south")
   }),
-  caption: [One block and an arrow.],
+  caption: [One block and an arrow: the smallest useful CeTZ figure.],
 ) <fig:block>
 ```
 
-Always pin `@preview/cetz:0.5.2`. The first compile downloads the package into
-the Typst package cache (network required once). For data plots use
-`#import "@preview/cetz-plot:0.1.3": plot` — plotting was split out of CeTZ in
-0.4.
+Pin `@preview/cetz:0.5.2`. The first compile downloads the package (network
+once). For data plots use `#import "@preview/cetz-plot:0.1.3": plot` — plotting
+moved out of CeTZ in 0.4.
 
-## The loop: draw, render, look, fix
+**Both imports matter in every module and nested scope.** A helper module that
+draws needs `#import "@preview/cetz:0.5.2": draw` at module level, and the
+canvas body needs `import draw: *`; otherwise names resolve to Typst built-ins
+and the error messages point at arguments (`unexpected argument`,
+`unknown variable: dbeafe`) instead of the missing import.
 
-CeTZ fails quietly in ways only pixels reveal (overlapping labels, curves
-through boxes, boxes wider than their text). Work in this order:
+## Pre-flight checklist
 
-1. Write or edit the figure, then call `typst_compile` with `format: "pdf"`
-   (deliverable) or `"png"` (quick check). Keep `preview: "first"` so the tool
-   returns a rendered PNG you can actually look at.
-2. Inspect the returned image. Check: every label inside its box; no line
-   crossing a filled shape; nothing cropped at the canvas edge; text not
-   overlapping other text; arrows pointing at the intended side.
-3. Fix the coordinates and recompile. Two or three passes is normal.
-4. When the figure is stable, run `typst_preview` so the user can read the whole
-   document live in a browser.
+Run this before compiling. Each line maps to a failure mode.
 
-Never claim a diagram is done without looking at the rendered page.
+1. Every drawing module/scope has both imports.
+2. No colour arithmetic (`+`, `*`); ramps use `.transparentize()`.
+3. Every `bezier` is `(start, end, ctrl1, ctrl2)`, controls placed **outside**
+   the obstacle (≥ 1.2 units from the spine, ≥ 0.3 cm clear of shapes).
+4. No helper both draws and returns a value; helpers that compute geometry are
+   separate and pure.
+5. `content()` has exactly one content argument; callbacks use explicit
+   `(0, 0)` (never `()`) for the position.
+6. No parameter or variable named after a Typst/CeTZ function (`text`, `rect`,
+   `line`, `grid`, `content`, `circle`, `fill`, `stroke`, `mark`, `box`, …).
+7. Boxes are sized from the text rule above; vertical room ≥ 0.5 cm per line.
+8. Legends/labels/rotated text have reserved space; legends sit in a band drawn
+   with `on-layer(-1, ...)`; nothing is within 0.3 cm of a shape it is not part
+   of.
+9. `mark:` is a dictionary (`mark: (end: ">")`); only `mark()` takes a bare
+   symbol.
+10. Colours differ in lightness as well as hue; the figure survives grayscale.
 
-## Coordinates and anchors
+## Top compile errors (full catalog in references)
 
-- `(1.5, 2)` is x, y in canvas units; `(x: 1, y: 2)` names components.
-- `(rel: (0.5, 0))` is relative to the previous position; `()` repeats it.
-- `(angle: 45deg, radius: 1.5)` is polar.
-- `"name"` uses an element's default anchor; `"name.north-east"` a named one;
-  `(name: "line", anchor: 50%)` or `(name: "circle", anchor: 30deg)` for path
-  and border anchors; `("a", 50%, "b")` interpolates between two coordinates.
-- `move-to(...)` and `set-origin(...)` move the current position and origin.
-- `line("box-a", "box-b")` already shortens to the borders.
+| Error text | Cause | Fix |
+| --- | --- | --- |
+| `cannot add color and ratio` | `rgb(..) + 50%` | `.transparentize(50%)` |
+| `unexpected argument` / `unknown variable: dbeafe` | missing `import draw: *` (name resolved to a Typst built-in) | add both imports in that scope |
+| `cannot join array with float` / `… with integer` | helper draws *and* returns a value | split into a pure geometry helper |
+| `Failed to resolve coordinate system: [x]` | two positional args to `content` read as two coordinates | one content value (`#text(..)[..]`) |
+| `expected integer, found string` | `mark: ">"` | `mark: (end: ">")` |
+| `expected function, found content` | parameter shadows `text` | rename the parameter (`label`, `value`, …) |
+| `cannot divide by zero` (inside `vector.typ`) | `angle`/`right-angle` with collinear or identical points | use distinct points on the two sides |
+| `Anchor 'x' not in anchors (…)` | unknown anchor name | use compass names, `"name.50%"`, or `(name: "n", anchor: 30deg)` |
+
+## Coordinates and anchors in one minute
+
+- `(1.5, 2)`, `(x: 1, y: 2)`, `(rel: (0.5, 0))`, `(angle: 45deg, radius: 1.5)`,
+  `() (current position)`, `("a", 50%, "b")` (interpolate).
+- `"name"` / `"name.north-east"` / `(name: "line", anchor: 50%)` /
+  `(name: "circle", anchor: 30deg)`.
+- `line("a", "b")` already shortens to the borders — name elements and connect
+  them instead of recomputing coordinates.
+- `move-to(coord)` / `set-origin(coord)` move the cursor / origin.
 
 ## Cheat sheet
 
-```typst
+```typ
 line((0,0), (2,0), stroke: blue, mark: (end: ">"))
-line((0,0), (1,1), (2,0), close: true)                  // polygon outline
+line((0,0), (1,1), (2,0), close: true)
 rect((0,0), (rel: (1.5, 0.8)), radius: 3pt, fill: rgb("#dbeafe"))
-circle((2,1), radius: 0.3)                              // or radius: (0.4, 0.2)
+circle((2,1), radius: 0.3)                     // or radius: (0.4, 0.2)
 arc((0,0), start: 30deg, delta: 120deg, mode: "PIE")
 grid((0,0), (2,2), step: 0.5, stroke: gray.lighten(40%))
 content((1,0.5), [label], anchor: "center")
-content((0,0), (2,2), box(width: 100%, [text box]))      // two coords = rectangle
-bezier((0,0), (1,1), (0.4,-0.2), (1.4,0.6))              // start, end, ctrl1, ctrl2
+content((0,0), (2,2), box(width: 100%, [text box]))
+bezier((0,0), (1,1), (0.4,-0.2), (1.4,0.6))    // start, end, ctrl1, ctrl2
 polygon((0,0), 6, angle: 30deg, radius: 1)
 n-star((0,0), 5, inner-radius: 45%, show-inner: true)
 ```
 
 ## Styling
 
-Pass style keys per call, or set them for everything after with `set-style`.
-Specificity is function > element type > global; dictionaries merge.
-
-```typst
+```typ
 set-style(
   stroke: (paint: rgb("#18181b"), thickness: 0.7pt, dash: "dashed"),
   fill: rgb("#f4f4f5"),
@@ -96,100 +148,56 @@ set-style(
 )
 ```
 
-Marks: `mark: (start: "<", end: ">")`, mnemonics `> < <> [] [ ] | o + x * )> >>`.
-Mark keys: `symbol`, `fill`, `stroke`, `scale`, `length`, `width`, `inset`,
-`pos`, `offset`, `anchor`, `flip`, `reverse`.
+Precedence: call argument > element type > global; dictionaries merge. Marks:
+`mark: (start: "<", end: ">")`, mnemonics `> < <> [] [ ] | o + x * )> >>`, with
+`scale`, `fill`, `stroke`, `pos`, `length`, `width`, `inset`, `anchor`.
 
 ## Composition
 
-```typst
-group({ ... }, name: "g")          // scoped styling, exposes "g.north-east"
-scope({ ... })                     // scoped state without a named element
-on-layer(-1, { ... })              // lower layers draw first (backgrounds)
-hide(line("a", "b"))               // invisible, still resolvable
-intersections("i", "a", "b")       // creates "i.0", "i.1", ...
+```typ
+group({ ... }, name: "g")            // scoped styling, exposes "g.north-east"
+scope({ ... })                       // scoped state without a named element
+on-layer(-1, { ... })                // background bands
+hide(line("a", "b"))                 // invisible but resolvable
+intersections("i", "a", "b")         // creates "i.0", "i.1", …
 for-each-anchor("g", name => { ... })
-merge-path({ ... }, close: true)   // one continuous path; supports marks
-compound-path({ ... }, fill-rule: "even-odd")   // sub-paths, e.g. holes
+merge-path({ ... }, close: true)     // one path, supports marks
+compound-path({ ... }, fill-rule: "even-odd")
 boolean("a", "b", op: "difference", fill: blue)
 rect-around("a", "b", padding: 0.1)
 ```
 
 Libraries:
 
-```typst
+```typ
 angle.angle("a.start", "a.end", "b.end", label: $theta$, radius: 0.8)
+angle.right-angle("corner", "side-a-end", "side-b-end", radius: 0.3)
 tree.tree(([root], ([a], [a1]), [b]), draw-node: node => { ... }, draw-edge: (p, c) => line(p.group-name, c.group-name))
 decorations.brace((0,-0.5), (3,-0.5), amplitude: 0.2)
-decorations.wave(target, amplitude: 0.25, segments: 8)
+decorations.wave(line((0,0), (2,1)), amplitude: 0.25, segments: 8)
 palette.new(colors: (red, blue, green))
 ```
 
-3D uses a projection scope; keep labels and geometry inside it:
+3D: keep geometry and labels **inside** the projection, and choose angles that
+separate the axes (`ortho(x: 65deg, y: -35deg)` reads well):
 
-```typst
+```typ
 ortho(x: 65deg, y: -35deg, {
-  on-xz({ grid((0,0), (1.6,1.6), step: 0.4) })     // ground plane
-  on-xy({ line((0,0), (0,1.5), mark: (end: ">")) }) // vertical axis
-  line((0,0,0), (1.1, 0.7, 0.95), mark: (end: ">")) // 3D vector
+  on-xz({ grid((0,0), (1.6,1.6), step: 0.4) })        // ground plane
+  on-xy({ line((0,0), (0,1.5), mark: (end: ">")) })    // vertical axis
+  line((0,0,0), (1.1, 0.7, 0.95), mark: (end: ">"))    // 3D vector
 })
 ```
 
-## Recipes
+## Verification
 
-**Annotated block diagram** — boxes on a spine, labels via `content`, shapes on
-the left/right for bypasses. Reserve real space for labels: a 1 cm box at 10 pt
-text fits roughly ten characters; widen the box or shrink the text otherwise.
+- Compiles with zero errors.
+- The rendered image has been looked at after the final edit.
+- No label touches a box border or another label; nothing is cropped.
+- Every arrow touches the intended shape, on the intended face.
+- Caption states the takeaway, not the mechanics.
+- Colours still distinguish the roles in grayscale.
 
-```typst
-let layer(x1, y1, x2, y2, label, fill: white) = {
-  rect((x1, y1), (x2, y2), radius: 2pt, fill: fill)
-  content(((x1 + x2) / 2, (y1 + y2) / 2), label, anchor: "center")
-}
-layer(0, 0, 3, 0.6, [LayerNorm])
-layer(0, 1.0, 3, 1.6, [Attention], fill: rgb("#dbeafe"))
-line((1.5, 0.6), (1.5, 1.0), mark: (end: ">"))
-```
-
-**Matrix / heatmap** — loop over rows and columns, encode the value in the fill
-and print the number. Use `high.transparentize(100% - value * 100%)` for a
-one-color ramp (there is no color-mix call in CeTZ).
-
-**Grouped flow** — draw stages left to right, then use
-`decorations.brace(start, end)` under a contiguous run of stages to name a
-phase, and a `dash: "densely-dashed"` line for a boundary.
-
-**Hierarchy** — `tree.tree` with a `draw-node` that styles by `node.depth` and
-a `draw-edge` that calls `line(parent.group-name, child.group-name)`.
-
-**Geometry** — combine `circle`, `arc`, `polygon`, and `angle.angle` with named
-elements; check the angle label radius so it does not cover the vertex.
-
-## Pitfalls
-
-- Pin the CeTZ version. `plot` is not part of CeTZ 0.5; use `cetz-plot`.
-- `rgb(..) + 50%` is an error; use `.transparentize()` / `.lighten()`.
-- `bezier(start, end, ctrl1, ctrl2)` — endpoints first, or curves go the wrong
-  way.
-- A Typst helper function that draws *and* returns a coordinate triggers
-  "cannot join array with float"; compute coordinates in a separate pure
-  function.
-- `content((), [...])` means "current position", which is wrong inside
-  callbacks (use `(0, 0)`).
-- Two positional args to `content` are two coordinates, not coordinate +
-  content.
-- `canvas(length: ...)` needs a length, not a ratio; use `layout` to size to a
-  fraction of the page.
-- In `ortho`, put labels inside the projection; outside they use unprojected
-  coordinates.
-- Elements hidden with `hide` still affect intersections, which is useful, but
-  they also count as elements when resolving coordinates by name.
-
-## Verification checklist
-
-- Compiles with zero errors (`typst_compile`).
-- Rendered image inspected at least once after the last edit.
-- No label overlaps a box edge or another label.
-- Every arrow touches the intended shape and points the right way.
-- Colors stay distinguishable in grayscale (light vs dark fill, not only hue).
-- Caption states the takeaway, not just the mechanics.
+If a compile fails, read only the first diagnostic and match it in
+[references/cetz-failure-modes.md](references/cetz-failure-modes.md) — Typst
+reports the earliest error, and later ones may disappear once it is fixed.

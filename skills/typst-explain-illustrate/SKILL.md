@@ -10,7 +10,10 @@ explanation as the prose. A wall of text with one decorative diagram is a
 failure; three clean figures with tight captions is the target.
 
 Companion skills: `cetz-diagrams` for drawing, `typst-documents` for layout and
-syntax. Read both before writing the document.
+syntax. Read both before writing the document. For figures, copy the nearest
+recipe from `cetz-diagrams/references/cetz-recipes.md` and run the pre-flight
+checklist in `cetz-diagrams/SKILL.md` — one syntax pass plus one or two layout
+passes is the budget; a longer loop means a skipped check, not a hard problem.
 
 ## Workflow
 
@@ -44,30 +47,38 @@ syntax. Read both before writing the document.
   text(weight: "bold", fill: rgb("#2563eb"), it))
 
 #align(center)[
-  #text(17pt, weight: "bold")[<Title>]
+  #text(17pt, weight: "bold")[Why the residual stream stays unnormalized]
   #v(0.2em)
-  #text(10pt, fill: rgb("#71717a"))[<Author> · <Date> · reading time]
+  #text(10pt, fill: rgb("#71717a"))[A. Author · September 2026 · 5 min read]
 ]
 
 #block(fill: rgb("#f4f4f5"), inset: (x: 12pt, y: 10pt), radius: 4pt, width: 100%)[
-  *TL;DR.* <The conclusion, in two sentences, including the mechanism.>
+  *TL;DR.* Moving the norm inside the branch keeps the shortcut an identity map, so gradients
+  survive depth $L$ without warmup.
 ]
 
-= <First idea>
+= Where the norm sits
 
-<Prose with `inline math`, then a figure.>
+A block is a sum of a shortcut and a branch; the two layouts differ in one place, $y = x + F("norm"(x))$.
 
-#figure(canvas(length: 1cm, { ... }), caption: [<What the figure shows>, so the reader can skip the prose.]) <fig:first>
+#figure(
+  canvas(length: 1cm, {
+    import draw: *
+    set-style(stroke: (paint: rgb("#18181b"), thickness: 0.7pt), content: (padding: 0.2))
+    rect((0.6, 0), (3.0, 0.6), radius: 2pt, fill: rgb("#dbeafe"))
+    content((1.8, 0.3), [branch $F$], anchor: "center")
+    line((1.8, 0.6), (1.8, 1.1), mark: (end: ">"))
+    content((1.8, -0.2), [input], anchor: "north")
+  }),
+  caption: [The branch sees a normalized input while the shortcut does not, so the residual path is an identity.],
+) <fig:first>
 
-@fig:first shows <the one thing to notice>.
-
-= <Second idea>
-...
+@fig:first shows the ordering that matters.
 
 = Takeaways
-- <Takeaway 1>
-- <Takeaway 2>
-```
+- The residual stream is a shared bus; normalize the branch that writes to it.
+- An identity path through depth is what makes deep stacks trainable.
+
 
 ## Figure selection
 

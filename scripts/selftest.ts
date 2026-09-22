@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -333,6 +333,39 @@ async function main(): Promise<void> {
       assert.equal(run.ok, false);
       assert.match(run.stderr, /not found|No such file|cannot|error/i);
       return "typst reports a missing input";
+    });
+
+    await check("every complete Typst example in the skills compiles", async () => {
+      const skillFiles: string[] = [];
+      const walk = async (dir: string): Promise<void> => {
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+          if (entry.name === "vendor") continue; // third-party fragments are not complete documents
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) await walk(full);
+          else if (entry.name.endsWith(".md")) skillFiles.push(full);
+        }
+      };
+      await walk(join(ROOT, "skills"));
+
+      let blocks = 0;
+      const failures: string[] = [];
+      for (const file of skillFiles) {
+        const text = await readFile(file, "utf8");
+        const matches = [...text.matchAll(/```typst\n([\s\S]*?)```/g)].map((match) => match[1] ?? "");
+        for (const [index, source] of matches.entries()) {
+          blocks++;
+          const sourcePath = join(tmp, `doc-${blocks}.typ`);
+          await writeFile(sourcePath, source, "utf8");
+          const run = await runTypst(["compile", sourcePath, "--diagnostic-format", "short", join(tmp, `doc-${blocks}.pdf`)]);
+          if (!run.ok) {
+            const detail = formatDiagnostics(parseDiagnostics(run.stderr), { limit: 2 }) || run.stderr.slice(0, 200);
+            failures.push(`${file.replace(ROOT + "/", "")} block #${index + 1}: ${detail.split("\n")[0]}`);
+          }
+        }
+      }
+      assert.ok(blocks >= 10, `expected the skills to ship compiling examples, found ${blocks}`);
+      assert.deepEqual(failures, [], `documentation examples failed to compile:\n${failures.join("\n")}`);
+      return `${blocks} examples from ${skillFiles.length} skill files`;
     });
 
     // ------------------------------------------------------------- preview server

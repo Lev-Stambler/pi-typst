@@ -17,6 +17,6 @@ Deliverable (default `explain/<slug>/main.typ`, or `$2` when given):
 Process:
 - After each figure or section, call `typst_compile` with `format: "pdf"` and `preview: "first"`, then look at the returned page image and fix overlaps, cropping, and label collisions before continuing. Iterate at least twice.
 - Export the final PDF next to the `.typ` file.
-- Start `typst_preview` and report the URL so the document can be read in the browser.
+- Start `typst_preview` and report the URL so the document can be read in the browser (it serves the compiled PDF live).
 
 Do not finish until the document compiles with zero errors and you have inspected the rendered pages.

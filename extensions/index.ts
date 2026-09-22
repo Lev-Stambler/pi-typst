@@ -14,8 +14,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { readdir, stat } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { stat } from "node:fs/promises";
+import { basename, relative } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
@@ -36,12 +36,11 @@ import {
   resolveTypstBinary,
   runTypst,
 } from "./lib/typst.ts";
+import { defaultOutput, listOutputs, truncate, withTagPattern } from "./lib/outputs.ts";
+import { parsePreviewArgs } from "./lib/args.ts";
 import { PreviewServer } from "./lib/server.ts";
 
-type ToolTheme = ExtensionContext["ui"]["theme"];
-
-interface CompileDetails {
-  input: string;
+interface CompileDetails {  input: string;
   format: string;
   command: string;
   outputs: string[];
@@ -116,58 +115,31 @@ const PREVIEW_SCHEMA = Type.Object({
     port: Type.Optional(Type.Number({ description: "Preferred port. Default: 7777 (falls back if taken)." })),
     host: Type.Optional(Type.String({ description: "Bind address. Default: 127.0.0.1." })),
     cjk: Type.Optional(Type.Boolean({ description: "Load CJK font assets (auto-detected from the document by default)." })),
+    mode: Type.Optional(
+      StringEnum(["pdf", "wasm"] as const, {
+        description: "Preview engine: pdf (typst CLI, default when installed) or wasm (typst.ts in the browser).",
+      }),
+    ),
   });
 
 // One preview server per pi session, started lazily and closed on shutdown.
 let previewServer: PreviewServer | null = null;
 let previewStarting: Promise<PreviewServer> | null = null;
 
-function truncate(text: string, limit = MAX_TEXT): string {
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit)}\n... (${text.length - limit} more characters truncated)`;
-}
-
-function withTagPattern(output: string, format: string): string {
-  if (format !== "png" && format !== "svg") return output;
-  if (output.includes("{p}") || output.includes("{0p}") || output.includes("{t}")) return output;
-  const match = output.match(/^(.*?)(\.[A-Za-z0-9]+)$/);
-  if (!match) return output;
-  return `${match[1]}-{p}${match[2]}`;
-}
-
-function defaultOutput(input: string, format: string): string {
-  const base = input.replace(/\.typ$/i, "");
-  if (format === "png" || format === "svg") return `${base}-{p}.${format}`;
-  return `${base}.${format}`;
-}
-
-/** Expand a typst page-template output pattern into the files that were written. */
-async function listOutputs(pattern: string, cwd: string): Promise<{ files: string[]; bytes: number }> {
-  if (!pattern.includes("{p}") && !pattern.includes("{0p}") && !pattern.includes("{t}")) {
-    const info = await stat(pattern).catch(() => null);
-    return { files: info?.isFile() ? [pattern] : [], bytes: info?.size ?? 0 };
+/** Stop the preview server, including a start that is still in flight. */
+async function stopPreview(): Promise<string | null> {
+  const starting = previewStarting;
+  previewStarting = null;
+  if (starting) {
+    const pending = await starting.catch(() => null);
+    if (pending && pending !== previewServer) await pending.stop().catch(() => {});
   }
-
-  const dir = resolve(cwd, pattern, "..");
-  const base = pattern.split(/[\\/]/).pop() ?? pattern;
-  const escaped = base
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\\\{0?p\\\}/g, "\\d+")
-    .replace(/\\\{t\\\}/g, "\\d+");
-  const re = new RegExp(`^${escaped}$`);
-
-  const entries = await readdir(dir).catch(() => [] as string[]);
-  const files: string[] = [];
-  let bytes = 0;
-  for (const entry of entries) {
-    if (!re.test(entry)) continue;
-    const info = await stat(join(dir, entry)).catch(() => null);
-    if (!info?.isFile()) continue;
-    files.push(join(dir, entry));
-    bytes += info.size;
-  }
-  files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  return { files, bytes };
+  const server = previewServer;
+  previewServer = null;
+  if (!server) return null;
+  const url = server.url;
+  await server.stop().catch(() => {});
+  return url;
 }
 
 function openBrowser(url: string): void {
@@ -182,7 +154,7 @@ function openBrowser(url: string): void {
 
 async function ensurePreview(
   ctx: ExtensionContext,
-  options: { doc?: string; port?: number; host?: string; cjk?: boolean; workspace?: string },
+  options: { doc?: string; port?: number; host?: string; cjk?: boolean; workspace?: string; mode?: "pdf" | "wasm" },
 ): Promise<PreviewServer> {
   if (previewServer) {
     if (options.doc) {
@@ -202,6 +174,7 @@ async function ensurePreview(
         host: options.host,
         port: options.port,
         cjk: options.cjk,
+        mode: options.mode,
       });
       await server.start();
       previewServer = server;
@@ -228,15 +201,14 @@ async function findMainDoc(ctx: ExtensionContext): Promise<string> {
   });
   const preferred = ["main.typ", "paper.typ", "index.typ", "doc.typ"];
   for (const name of preferred) {
-    const match = candidates.find((path) => path.endsWith(`/${name}`) || path === join(ctx.cwd, name));
+    const match = candidates.find((path) => basename(path) === name);
     if (match) return match;
   }
   return shallow[0] ?? candidates[0]!;
 }
 
-async function previewUrlFor(ctx: ExtensionContext): Promise<string | null> {
-  if (!previewServer) return null;
-  return previewServer.url;
+async function previewUrl(): Promise<string | null> {
+  return previewServer ? previewServer.url : null;
 }
 
 export default function piTypstExtension(pi: ExtensionAPI): void {
@@ -315,7 +287,7 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
         try {
           const previews = await compilePngPreviews(input, {
             workDir: tmp,
-            pages: params.preview_pages ?? (previewMode === "first" ? "1" : undefined),
+            pages: params.preview_pages ?? (previewMode === "first" ? "1" : "1-4"),
             ppi: Math.min(params.preview_ppi ?? 110, 200),
             limit: previewMode === "first" ? 1 : 4,
             cwd: ctx.cwd,
@@ -337,7 +309,7 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
         }
       }
 
-      if (!(await previewUrlFor(ctx))) {
+      if (!(await previewUrl())) {
         content.push({ type: "text", text: "Tip: call typst_preview to read this document live in a browser." });
       }
 
@@ -369,7 +341,7 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
       );
     },
 
-    renderResult(result, { expanded, isPartial }, theme) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       if (isPartial) return new Text(theme.fg("warning", "compiling…"), 0, 0);
       const details = result.details as CompileDetails | undefined;
       if (!details || !details.format) {
@@ -379,14 +351,14 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
           .join("\n");
         return new Text(theme.fg("error", text.split("\n").slice(0, expanded ? 20 : 3).join("\n")), 0, 0);
       }
-      const first = details.outputs[0] ? relative(process.cwd(), details.outputs[0]) : "";
+      const first = details.outputs[0] ? relative(context.cwd, details.outputs[0]) : "";
       let line =
         theme.fg("success", "✓ ") +
         theme.fg("toolOutput", `${details.format} ${first}`) +
         theme.fg("dim", ` · ${details.pagesWritten} file(s) · ${details.ms} ms · ${humanBytes(details.bytes)}`);
       if (details.warnings.length > 0) line += theme.fg("warning", ` · ${details.warnings.length} warning(s)`);
       if (expanded && details.outputs.length > 1) {
-        line += "\n" + theme.fg("dim", details.outputs.map((file) => `  ${relative(process.cwd(), file)}`).join("\n"));
+        line += "\n" + theme.fg("dim", details.outputs.map((file) => `  ${relative(context.cwd, file)}`).join("\n"));
       }
       return new Text(line, 0, 0);
     },
@@ -417,7 +389,7 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
       const stderr = run.stderr.trim();
       const body = [stdout, stderr].filter(Boolean).join("\n") || `(no output; exit code ${run.code})`;
       return {
-        content: [{ type: "text", text: truncate(body) }],
+        content: [{ type: "text", text: truncate(body, MAX_TEXT) }],
         details: { args: params.args, command: run.command, code: run.code, ms: run.ms },
       };
     },
@@ -457,7 +429,7 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
     promptSnippet: "Serve a live browser preview of a Typst document",
     promptGuidelines: [
       "Use typst_preview when the user wants to see a .typ document in a browser; report the returned URL.",
-      "typst_preview renders in the browser and refreshes automatically, so no reload calls are needed after edits.",
+      "typst_preview refreshes automatically when files change, so no reload calls are needed after edits.",
     ],
     parameters: PREVIEW_SCHEMA,
 
@@ -465,12 +437,10 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
       const action = params.action ?? "start";
 
       if (action === "stop") {
-        if (!previewServer) {
+        const url = await stopPreview();
+        if (!url) {
           return { content: [{ type: "text", text: "typst preview is not running." }], details: { action } };
         }
-        const url = previewServer.url;
-        await previewServer.stop();
-        previewServer = null;
         ctx.ui.setStatus("typst-preview", undefined);
         return { content: [{ type: "text", text: `Stopped typst preview (${url}).` }], details: { action, url } };
       }
@@ -497,6 +467,7 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
         host: params.host,
         cjk: params.cjk,
         workspace: params.workspace,
+        mode: params.mode,
       });
       const state = server.state();
       ctx.ui.setStatus("typst-preview", `typst ▸ ${server.url}`);
@@ -542,22 +513,12 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
       return filtered.length > 0 ? filtered : null;
     },
     handler: async (args, ctx) => {
-      const tokens = args.split(/\s+/).filter(Boolean);
-      const options: { doc?: string; port?: number; host?: string; cjk?: boolean; open: boolean; workspace?: string } = {
-        open: true,
-      };
-      for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i]!;
-        if (token === "--no-open") options.open = false;
-        else if (token === "--cjk") options.cjk = true;
-        else if (token === "--port") options.port = Number(tokens[++i]);
-        else if (token === "--host") options.host = tokens[++i];
-        else if (token === "--workspace") options.workspace = tokens[++i];
-        else if (token.startsWith("--")) {
-          ctx.ui.notify(`Unknown option: ${token}`, "warning");
-          return;
-        } else options.doc = token;
+      const parsed = parsePreviewArgs(args);
+      if (!parsed.ok) {
+        ctx.ui.notify(parsed.error, "error");
+        return;
       }
+      const options = parsed.args;
 
       try {
         const server = await ensurePreview(ctx, options);
@@ -572,9 +533,6 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
-    if (previewServer) {
-      await previewServer.stop().catch(() => {});
-      previewServer = null;
-    }
+    await stopPreview();
   });
 }

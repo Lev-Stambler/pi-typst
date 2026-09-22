@@ -7,18 +7,19 @@ preview, and skills that turn a concept into a typeset explainer with
 - **`typst_compile`** — compile `.typ` to PDF/PNG/SVG through the typst CLI,
   with parsed diagnostics and an inline page image in the tool result.
 - **`typst_cli`** — run the rest of the CLI (`eval`, `query`, `fonts`, `init`).
-- **`typst_preview`** — serve the document over HTTP; the page compiles Typst
-  *in the browser* with [typst.ts](https://github.com/Myriad-Dreamin/typst.ts)
-  and re-renders as files change. The server only serves files.
+- **`typst_preview`** — serve a live preview over HTTP. The typst CLI compiles
+  the document to PDF and the browser shows that PDF, reloading as files change.
+  Without a CLI it falls back to [typst.ts](https://github.com/Myriad-Dreamin/typst.ts)
+  running in the browser.
 - **`/typst-preview`** — the same thing as a slash command, opening the browser.
 - **`/explain` and `/illustrate`** — prompt templates that force the
   render-inspect-fix loop.
 - **Skills** — `typst-explain-illustrate`, `cetz-diagrams`, `typst-documents`.
 
-![Browser preview compiling a Typst document with typst.ts](media/preview.png)
+![A diagram typeset by the typst CLI](media/transformer-block.png)
 
-`typst_preview` serves the document; the browser compiles it with typst.ts and
-re-renders as files change.
+`typst_compile` renders through the CLI (PDF first); `typst_preview` serves that
+same PDF live over a port.
 
 ## Install
 
@@ -50,25 +51,25 @@ Requirements:
 `typst_preview` (or `/typst-preview`) starts a small HTTP server and returns a
 URL such as `http://127.0.0.1:7777`.
 
-- The browser downloads the workspace files (`/api/tree`, `/api/file`), mirrors
-  them into a typst.ts virtual file system, compiles with Typst **0.15.1**, and
-  renders SVG. Nothing is compiled on the server.
-- The page re-checks file mtimes about once per second and re-renders on change,
-  so saving a file is enough — no reload.
-- The **PDF** button produces a PDF in the browser with `$typst.pdf()`.
-- Typst packages (`@preview/cetz:0.5.2`, …) are fetched by the browser from
-  `packages.typst.org`; fonts go through `/api/fonts/*` and are cached on disk,
-  which keeps the viewer working offline after the first load.
-- typst.ts is served from `node_modules` when installed. If it is missing (for
-  example a bare local-path install without `npm install`), the server reports
-  `assets.mode: "cdn"` and the viewer loads typst.ts from jsDelivr instead.
-- typst.ts is pinned to `0.8.0-rc3` because it embeds Typst **0.15.1**, matching
-  the Typst 0.15 line that the CLI tools and the skills target. It will move to
-  `0.8.0` stable when that ships; the pin lives in `package.json` and in
-  `TYPST_TS_VERSION` in `extensions/lib/server.ts`.
+**PDF-first (default).** The server compiles the document with the typst CLI and
+serves the bytes from `/api/pdf`; the page embeds it in the browser's own PDF
+viewer. That means exact CLI output, print/zoom/select for free, no WASM
+download, and no font fetching. The page polls file mtimes and recompiles when
+anything changes — a 400 response carries the diagnostics and the viewer shows
+them in a banner while keeping the last good PDF on screen.
 
-Arguments: `doc`, `workspace`, `port` (default 7777, falls back to the next free
-port), `host` (default 127.0.0.1), `cjk` (auto-detected from the document).
+**WASM fallback.** With `mode: "wasm"` (or `--wasm`, or automatically when no
+typst CLI is installed) the page instead loads typst.ts from `node_modules` and
+compiles in the browser: no server-side compile, fonts proxied and cached under
+`~/.cache/pi-typst/fonts`, Typst packages fetched from `packages.typst.org`, and
+a 96 MiB mirror budget for the workspace. If typst.ts is missing locally (for
+example a bare local-path install without `npm install`), the assets come from
+jsDelivr and the state reports `assets.mode: "cdn"`.
+
+![The WASM fallback viewer](media/preview-wasm.png)
+
+`typst_preview` arguments: `action` (`start`/`stop`/`status`), `doc`,
+`workspace`, `port`, `host`, `cjk`, `mode`.
 
 ## Tools
 
@@ -156,13 +157,13 @@ route, and renders a CeTZ document through typst.ts in headless Chrome.
 
 - **"Could not find a usable `typst` binary"** — install Typst or set
   `TYPST_BIN`. The preview server still works without the CLI.
-- **Browser preview shows a boot error** — run `npm install` in the package
-  directory so the typst.ts assets exist, or check the browser console; the
-  server falls back to the CDN when assets are missing but still needs network
-  access on the first load.
-- **CeTZ import fails in the browser** — the browser fetches
-  `packages.typst.org` directly; a network that blocks it will break previews
-  while `typst_compile` keeps working (it uses the local package cache).
+- **Preview shows a boot error** — PDF mode needs the typst CLI; check
+  `typst_cli --version`. For WASM mode run `npm install` in the package
+  directory so the typst.ts assets exist (the server otherwise falls back to the
+  CDN, which needs network on first load).
+- **CeTZ import fails in WASM mode** — the browser fetches
+  `packages.typst.org` directly; a network that blocks it breaks that mode while
+  PDF mode and `typst_compile` keep working from the local package cache.
 - **CJK documents** — font assets for Chinese/Japanese/Korean are loaded
   automatically when the document contains CJK characters; force it with the
   `cjk` argument.

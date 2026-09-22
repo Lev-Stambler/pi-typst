@@ -7,8 +7,9 @@ description: Write and debug Typst (.typ) documents with the typst_compile, typs
 
 Use the bundled tools instead of shelling out: `typst_compile` resolves the
 binary, parses diagnostics into readable errors, and returns a page image;
-`typst_preview` serves a live browser view; `typst_cli` covers `eval`, `query`,
-`fonts`, and `init`.
+`typst_preview` serves that CLI-compiled PDF live in a browser (typst.ts in the
+browser is the no-CLI fallback); `typst_cli` covers `eval`, `query`, `fonts`,
+and `init`.
 
 Vendored reference set (Typst 0.15): `references/vendor/claude-skill-typst/`.
 Route to it rather than guessing:

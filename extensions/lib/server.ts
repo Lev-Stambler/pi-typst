@@ -12,7 +12,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { findTypFiles, isPathInside, resolveTypstBinary, WORKSPACE_SKIP_DIRS } from "./typst.ts";
+import { compilePdf, findTypFiles, formatDiagnostics, isPathInside, rawStderr, resolveTypstBinary, WORKSPACE_SKIP_DIRS } from "./typst.ts";
 import { viewerHtml } from "./viewer.ts";
 
 /** typst.ts release served to the browser. Keep in sync with package.json. */
@@ -152,6 +152,7 @@ export interface PreviewState {
   workspace: string;
   assets: { mode: "local" | "cdn"; typstTs: string; compiler: string; renderer: string };
   fonts: { prefix: string; groups: FontGroup[] };
+  preview: { mode: "pdf" | "wasm"; pdf: boolean; fallback: boolean };
   docs: PreviewDoc[];
 }
 
@@ -162,6 +163,8 @@ export interface PreviewServerOptions {
   host?: string;
   port?: number;
   cjk?: boolean;
+  /** "pdf" renders through the typst CLI (default when it is installed); "wasm" forces typst.ts in the browser. */
+  mode?: "pdf" | "wasm";
 }
 
 export interface StartResult {
@@ -187,18 +190,25 @@ export class PreviewServer {
   readonly cwd: string;
   readonly host: string;
   readonly requestedPort: number;
-  readonly cjk: boolean;
 
   #doc: string;
   #workspace: string;
+  #root: string;
+  #fontPaths: string[];
+  #inputs: Record<string, string>;
+  #cjk: boolean;
+  #cjkExplicit: boolean;
   #startedAt = new Date().toISOString();
   #server: Server | null = null;
   #port = 0;
   #url = "";
   #cliVersion: string | null = null;
+  #previewMode: "pdf" | "wasm" = "wasm";
+  #fallback = false;
   #vendorRoot: string | null;
   #fontCacheDir: string;
   #docsCache: { at: number; docs: PreviewDoc[] } | null = null;
+  #docsRefreshing = false;
 
   private constructor(options: PreviewServerOptions, vendorRoot: string | null, fontCacheDir: string) {
     this.#doc = resolve(options.doc);
@@ -206,10 +216,15 @@ export class PreviewServer {
     this.#workspace = resolve(options.workspace ?? dirname(this.#doc));
     this.host = options.host ?? "127.0.0.1";
     this.requestedPort = options.port ?? DEFAULT_PORT;
-    this.cjk = options.cjk ?? false;
+    this.#root = resolve(options.workspace ?? dirname(this.#doc));
+    this.#fontPaths = [];
+    this.#inputs = {};
+    this.#cjk = options.cjk ?? false;
+    this.#cjkExplicit = options.cjk !== undefined;
     this.#vendorRoot = vendorRoot;
     this.#fontCacheDir = fontCacheDir;
     if (!isPathInside(this.#workspace, this.#doc)) this.#workspace = dirname(this.#doc);
+    this.#root = this.#workspace;
   }
 
   static async create(options: PreviewServerOptions): Promise<PreviewServer> {
@@ -230,9 +245,11 @@ export class PreviewServer {
     await mkdir(fontCacheDir, { recursive: true }).catch(() => {});
 
     // Load CJK font assets automatically when the document contains CJK text.
-    const cjk = options.cjk ?? looksLikeCjk(await readFile(resolve(options.doc), "utf8").catch(() => ""));
-    const server = new PreviewServer({ ...options, cjk }, await resolveVendorRoot(), fontCacheDir);
+    const server = new PreviewServer(options, await resolveVendorRoot(), fontCacheDir);
     server.#cliVersion = cliVersion;
+    server.#previewMode = options.mode === "wasm" || !cliVersion ? "wasm" : "pdf";
+    server.#fallback = options.mode === "pdf" && !cliVersion;
+    server.#detectCjk(await readFile(resolve(options.doc), "utf8").catch(() => ""));
     return server;
   }
 
@@ -246,6 +263,19 @@ export class PreviewServer {
 
   get doc(): string {
     return this.#doc;
+  }
+
+  get cjk(): boolean {
+    return this.#cjk;
+  }
+
+  get previewMode(): "pdf" | "wasm" {
+    return this.#previewMode;
+  }
+
+  /** Re-derive the font groups from document content unless the user was explicit. */
+  #detectCjk(text: string): void {
+    if (!this.#cjkExplicit) this.#cjk = looksLikeCjk(text);
   }
 
   get workspace(): string {
@@ -262,7 +292,10 @@ export class PreviewServer {
         port: this.#port,
         startedAt: this.#startedAt,
         cliVersion: this.#cliVersion,
-        engine: `typst.ts ${TYPST_TS_VERSION} (Typst ${TYPST_TS_TYPST_VERSION})`,
+        engine:
+          this.#previewMode === "pdf"
+            ? `typst CLI ${this.#cliVersion ?? "?"} (PDF)`
+            : `typst.ts ${TYPST_TS_VERSION} (Typst ${TYPST_TS_TYPST_VERSION})`,
       },
       doc: {
         path: this.#vfs(this.#doc),
@@ -281,7 +314,12 @@ export class PreviewServer {
         : { mode: "cdn", ...CDN_BASES },
       fonts: {
         prefix: "/api/fonts/",
-        groups: this.cjk ? ["text", "emoji", "cjk"] : ["text", "emoji"],
+        groups: this.#cjk ? ["text", "emoji", "cjk"] : ["text", "emoji"],
+      },
+      preview: {
+        mode: this.#previewMode,
+        pdf: this.#cliVersion !== null,
+        fallback: this.#fallback,
       },
       docs: this.#docs(),
     };
@@ -296,10 +334,16 @@ export class PreviewServer {
   }
 
   async #refreshDocs(): Promise<PreviewDoc[]> {
-    const files = await findTypFiles(this.#workspace, { maxDepth: 4, limit: 300 });
-    const docs = files.map((abs) => ({ rel: this.#vfs(abs).slice(1), abs, name: basename(abs) }));
-    this.#docsCache = { at: Date.now(), docs };
-    return docs;
+    if (this.#docsRefreshing) return this.#docsCache?.docs ?? [];
+    this.#docsRefreshing = true;
+    try {
+      const files = await findTypFiles(this.#workspace, { maxDepth: 4, limit: 300 });
+      const docs = files.map((abs) => ({ rel: this.#vfs(abs).slice(1), abs, name: basename(abs) }));
+      this.#docsCache = { at: Date.now(), docs };
+      return docs;
+    } finally {
+      this.#docsRefreshing = false;
+    }
   }
 
   /** Bind the HTTP server, trying the requested port first and falling back gracefully. */
@@ -363,6 +407,8 @@ export class PreviewServer {
 
     this.#doc = absolute;
     if (!isPathInside(this.#workspace, absolute)) this.#workspace = dirname(absolute);
+    this.#root = this.#workspace;
+    this.#detectCjk(await readFile(absolute, "utf8").catch(() => ""));
     this.#docsCache = null;
     await this.#refreshDocs();
     return this.state();
@@ -424,7 +470,41 @@ export class PreviewServer {
 
       if (method === "GET" && url.pathname === "/api/tree") {
         const tree = await this.#tree();
-        this.#sendJson(response, 200, tree);
+        const etag = this.#treeTag(tree.files);
+        if (request.headers["if-none-match"] === etag) {
+          response.writeHead(304, { etag, "cache-control": "no-store" }).end();
+          return;
+        }
+        this.#sendJson(response, 200, tree, { etag });
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/api/pdf") {
+        if (!this.#cliVersion) {
+          this.#sendJson(response, 501, { error: "the typst CLI is not installed; PDF export is unavailable" });
+          return;
+        }
+        const render = await compilePdf(this.#doc, {
+          cwd: this.cwd,
+          root: this.#root,
+          fontPaths: this.#fontPaths,
+          inputs: this.#inputs,
+        });
+        if (!render.ok || !render.pdf) {
+          const message =
+            formatDiagnostics(render.diagnostics, { cwd: this.cwd }) || rawStderr(render.stderr, 12) || "PDF export failed";
+          response.writeHead(400, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+          response.end(message);
+          return;
+        }
+        // HTTP header values must be latin-1: provide an ASCII fallback plus an
+        // RFC 5987 UTF-8 name so unicode document names survive.
+        const stem = basename(this.#doc, extname(this.#doc));
+        const asciiName = (stem.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "document") + ".pdf";
+        const utf8Name = encodeURIComponent(stem + ".pdf");
+        this.#send(response, 200, "application/pdf", render.pdf, {
+          "content-disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+        });
         return;
       }
 
@@ -436,7 +516,11 @@ export class PreviewServer {
           return;
         }
         const info = await stat(abs).catch(() => null);
-        if (!info?.isFile()) {
+        if (!info) {
+          this.#sendJson(response, 404, { error: `not found: ${requested}` });
+          return;
+        }
+        if (!info.isFile()) {
           this.#sendJson(response, 404, { error: `not a file: ${requested}` });
           return;
         }
@@ -515,9 +599,11 @@ export class PreviewServer {
         if (entry.isDirectory()) {
           if (WORKSPACE_SKIP_DIRS.has(entry.name)) continue;
           await walk(full, depth + 1);
-        } else if (entry.isFile()) {
+        } else if (entry.isFile() || entry.isSymbolicLink()) {
+          // `stat` follows symlinks, so linked files are mirrored but linked
+          // directories are never walked (no cycles).
           const info = await stat(full).catch(() => null);
-          if (!info) continue;
+          if (!info?.isFile()) continue;
           if (info.size > MAX_FILE_BYTES) {
             skippedBig++;
             continue;
@@ -532,7 +618,13 @@ export class PreviewServer {
   }
 
   async #serveFont(name: string, response: ServerResponse): Promise<void> {
-    const decoded = decodeURIComponent(name);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(name);
+    } catch {
+      this.#sendJson(response, 400, { error: `malformed font name: ${name}` });
+      return;
+    }
     const spec = FONT_INDEX.get(decoded);
     if (!spec) {
       this.#sendJson(response, 404, { error: `unknown font asset: ${decoded}` });
@@ -617,8 +709,20 @@ export class PreviewServer {
     response.end(payload);
   }
 
-  #sendJson(response: ServerResponse, status: number, payload: unknown): void {
-    this.#send(response, status, "application/json; charset=utf-8", JSON.stringify(payload));
+  #sendJson(response: ServerResponse, status: number, payload: unknown, headers: Record<string, string> = {}): void {
+    this.#send(response, status, "application/json; charset=utf-8", JSON.stringify(payload), headers);
+  }
+
+  /** Cheap content tag for the file mirror: changes whenever a path, size, or mtime changes. */
+  #treeTag(files: PreviewFile[]): string {
+    let hash = 0;
+    for (const file of files) {
+      const line = `${file.path}:${file.mtimeMs}:${file.size}`;
+      for (let i = 0; i < line.length; i++) {
+        hash = (hash * 31 + line.charCodeAt(i)) | 0;
+      }
+    }
+    return `W/"${files.length}-${hash}"`;
   }
 
   async #readBody(request: IncomingMessage): Promise<string> {

@@ -1,7 +1,7 @@
 {
   "name": "pi-typst",
-  "version": "0.1.0",
-  "description": "Typst for pi: CLI tools, a live browser preview that compiles with typst.ts, and explain/illustrate skills for CeTZ diagrams",
+  "version": "0.2.0",
+  "description": "Typst for pi: PDF-first CLI tools, a live browser preview, and explain/illustrate skills for CeTZ diagrams",
   "keywords": [
     "pi-package",
     "typst",
@@ -41,7 +41,7 @@
     "prompts": [
       "./prompts"
     ],
-    "image": "https://raw.githubusercontent.com/Lev-Stambler/pi-typst/main/media/preview.png"
+    "image": "https://raw.githubusercontent.com/Lev-Stambler/pi-typst/main/media/transformer-block.png"
   },
   "dependencies": {
     "@myriaddreamin/typst.ts": "0.8.0-rc3",

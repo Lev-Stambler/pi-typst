@@ -30,8 +30,8 @@ syntax. Read both before writing the document.
 6. **Cross-check.** Every figure is referenced from prose; every acronym is
    expanded at first use; every number comes from a real run, log, or cited
    source; the TL;DR matches the conclusion.
-7. **Hand over.** Export the PDF with `typst_compile`, then `typst_preview` and
-   report the URL so the user can read it live.
+7. **Hand over.** Export the PDF with `typst_compile`, then `typst_preview` (it
+   serves that same CLI-compiled PDF live) and report the URL.
 
 ## Skeleton
 

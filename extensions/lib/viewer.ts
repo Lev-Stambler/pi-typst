@@ -63,6 +63,7 @@ export function viewerHtml(): string {
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; padding: 0; }
   body {
     background: var(--bg);
@@ -152,6 +153,20 @@ export function viewerHtml(): string {
     padding: 24px;
     text-align: center;
   }
+  main.pdf {
+    flex: 1;
+    display: flex;
+    padding: 12px;
+    min-height: 0;
+  }
+  main.pdf iframe {
+    flex: 1;
+    width: 100%;
+    min-height: 78vh;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--panel);
+  }
   .banner {
     margin: 14px auto 0;
     width: calc(100% - 28px);
@@ -218,7 +233,8 @@ export function viewerHtml(): string {
   </div>
 </header>
 <div id="banner" class="banner" hidden><pre id="banner-text"></pre></div>
-<main id="pages" class="pages"><div class="placeholder">loading typst.ts…</div></main>
+<main id="pages" class="pages"><div class="placeholder">loading…</div></main>
+<main id="pdf" class="pdf" hidden><iframe id="pdf-frame" title="PDF preview"></iframe></main>
 <footer class="meta">
   <span id="meta-left"></span>
   <span id="meta-right"></span>
@@ -242,8 +258,19 @@ export function viewerHtml(): string {
   var state = null;
   var typst = null;
   var vfsDoc = "/main.typ";
+  var pdfMain = document.getElementById("pdf");
+  var pdfFrame = document.getElementById("pdf-frame");
+  var pdfMode = false;
+  var pdfObjectUrl = null;
+  var pdfOldUrls = [];
+  var pdfSize = 0;
   var seen = new Map();
+  var seenBytes = new Map();
+  var mirroredBytes = 0;
+  var treeEtag = null;
+  var lastStateAt = 0;
   var busy = false;
+  var MIRROR_BUDGET = 96 * 1024 * 1024;
   var pageCount = 0;
   var lastMs = 0;
   var startedAt = Date.now();
@@ -258,6 +285,10 @@ export function viewerHtml(): string {
   applyZoom();
 
   function applyZoom() {
+    if (pdfMode) {
+      zoomEl.hidden = true;
+      return;
+    }
     zoomEl.value = zoom;
     if (zoom === "fit") {
       pagesEl.style.removeProperty("--page-width");
@@ -306,6 +337,13 @@ export function viewerHtml(): string {
   }
 
   function renderMeta() {
+    if (pdfMode) {
+      metaLeft.textContent =
+        prettyPath(state.doc.path) + "  ·  PDF" + (pdfSize ? "  ·  " + Math.round(pdfSize / 1024) + " KiB" : "") + "  ·  live";
+      metaRight.textContent = state.server.engine + "  ·  " + state.workspace;
+      document.title = state.doc.name + " · typst preview";
+      return;
+    }
     var pages = pageCount === 1 ? "1 page" : pageCount + " pages";
     var when = new Date().toLocaleTimeString();
     metaLeft.textContent = prettyPath(state.doc.path) + "  ·  " + pages + "  ·  " + lastMs + " ms  ·  " + when;
@@ -320,6 +358,22 @@ export function viewerHtml(): string {
     vfsDoc = state.doc.path;
     renderPicker();
     renderMeta();
+
+    pdfMode = Boolean(state.preview && state.preview.mode === "pdf");
+    if (pdfMode) {
+      document.getElementById("pdf").hidden = false;
+      pagesEl.hidden = true;
+      zoomEl.hidden = true;
+      if (state.preview.fallback) {
+        showBanner("The typst CLI was not found; falling back to the typst.ts WASM preview.", true);
+      }
+      await loadPdf();
+      setInterval(tick, 1200);
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) tick();
+      });
+      return;
+    }
 
     var mod = await import(state.assets.typstTs + "dist/esm/contrib/all-in-one-lite.bundle.js");
     typst = mod.$typst;
@@ -336,6 +390,7 @@ export function viewerHtml(): string {
     await typst.use(await mod.TypstSnippet.fetchPackageRegistry());
 
     setStatus("busy", "mirroring files");
+    lastStateAt = Date.now();
     await sync(true);
     await render();
     setInterval(tick, 1200);
@@ -344,18 +399,130 @@ export function viewerHtml(): string {
     });
   }
 
+  function releasePdfUrls() {
+    // Keep the previous blob alive briefly: a PDF viewer may still range-request it.
+    var stale = pdfOldUrls;
+    pdfOldUrls = [];
+    setTimeout(function () {
+      stale.forEach(function (url) { URL.revokeObjectURL(url); });
+    }, 15000);
+  }
+
+  async function loadPdf() {
+    if (busy) return;
+    busy = true;
+    setStatus("busy", "compiling pdf");
+    try {
+      var response = await fetch("/api/pdf?rev=" + Date.now(), { cache: "no-store" });
+      if (!response.ok) {
+        var message = await response.text();
+        showBanner(message || "PDF build failed (HTTP " + response.status + ")", false);
+        setStatus("error", "compile error");
+        return;
+      }
+      var blob = await response.blob();
+      var nextUrl = URL.createObjectURL(blob);
+      if (pdfObjectUrl) pdfOldUrls.push(pdfObjectUrl);
+      pdfObjectUrl = nextUrl;
+      pdfSize = blob.size;
+      pdfFrame.src = nextUrl;
+      releasePdfUrls();
+      showBanner(null);
+      setStatus("ok", "pdf " + Math.round(pdfSize / 1024) + " KiB");
+      renderMeta();
+    } catch (error) {
+      showBanner(error && error.message ? error.message : String(error), false);
+      setStatus("error", "pdf failed");
+    } finally {
+      busy = false;
+    }
+  }
+
+  function openPdf() {
+    var target = pdfObjectUrl || "/api/pdf";
+    var anchor = document.createElement("a");
+    anchor.href = target;
+    anchor.target = "_blank";
+    anchor.rel = "noopener";
+    if (pdfObjectUrl) anchor.download = state.doc.name.replace(/\.typ$/i, "") + ".pdf";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  async function tickPdf() {
+    if (document.hidden || busy) return;
+    try {
+      var headers = {};
+      if (treeEtag) headers["if-none-match"] = treeEtag;
+      var response = await fetch("/api/tree", { cache: "no-store", headers: headers });
+      if (response.status === 304) {
+        if (Date.now() - lastStateAt > 15000) await refreshState();
+        return;
+      }
+      if (!response.ok) {
+        setStatus("error", "server unreachable");
+        return;
+      }
+      treeEtag = response.headers.get("etag");
+      await refreshState();
+      await loadPdf();
+    } catch (error) {
+      setStatus("error", "server unreachable");
+    }
+  }
+
+  async function refreshState() {
+    var fresh = await getJson("/api/state");
+    lastStateAt = Date.now();
+    if (fresh.doc.path !== state.doc.path) {
+      state = fresh;
+      vfsDoc = state.doc.path;
+      renderPicker();
+      return true;
+    }
+    state = fresh;
+    return false;
+  }
+
   async function sync(force) {
-    var tree = await getJson("/api/tree");
+    var headers = {};
+    if (!force && treeEtag) headers["if-none-match"] = treeEtag;
+    var response = await fetch("/api/tree", { cache: "no-store", headers: headers });
+
+    if (response.status === 304) {
+      // Nothing changed on disk; only refresh the document list occasionally.
+      if (Date.now() - lastStateAt < 10000) return false;
+      return await refreshState();
+    }
+    if (!response.ok) throw new Error("/api/tree -> HTTP " + response.status);
+
+    var tree = await response.json();
+    treeEtag = response.headers.get("etag");
     var next = new Map();
     var changed = false;
+    var skippedLarge = 0;
 
     for (var i = 0; i < tree.files.length; i++) {
       var file = tree.files[i];
+      var size = file.size || 0;
+      var alreadyMirrored = seen.has(file.path);
       next.set(file.path, file.mtimeMs);
+
+      // Keep the browser from pulling an unbounded amount of workspace data.
+      // Typst sources are always mirrored; large assets are skipped past the budget.
+      if (!alreadyMirrored && mirroredBytes + size > MIRROR_BUDGET && !/\.typ$/i.test(file.path)) {
+        skippedLarge++;
+        continue;
+      }
+
       if (force || seen.get(file.path) !== file.mtimeMs) {
-        var response = await fetch("/api/file?path=" + encodeURIComponent(file.path), { cache: "no-store" });
-        if (response.ok) {
-          await typst.mapShadow(file.path, new Uint8Array(await response.arrayBuffer()));
+        var fileResponse = await fetch("/api/file?path=" + encodeURIComponent(file.path), { cache: "no-store" });
+        if (fileResponse.ok) {
+          var bytes = new Uint8Array(await fileResponse.arrayBuffer());
+          await typst.mapShadow(file.path, bytes);
+          mirroredBytes += size - (seenBytes.get(file.path) || 0);
+          seenBytes.set(file.path, size);
           changed = true;
         }
       }
@@ -364,23 +531,21 @@ export function viewerHtml(): string {
     seen.forEach(function (_mtime, path) {
       if (!next.has(path)) {
         typst.unmapShadow(path);
+        mirroredBytes -= seenBytes.get(path) || 0;
+        seenBytes.delete(path);
         changed = true;
       }
     });
     seen = next;
 
-    var fresh = await getJson("/api/state");
-    if (fresh.doc.path !== state.doc.path) {
-      state = fresh;
-      vfsDoc = state.doc.path;
-      renderPicker();
-      changed = true;
-    } else {
-      state = fresh;
-    }
+    if (await refreshState()) changed = true;
 
-    if (tree.truncated) {
-      showBanner("workspace too large: only the first files are mirrored; imports outside the mirror will fail.", true);
+    if (tree.truncated || skippedLarge > 0) {
+      showBanner(
+        (tree.truncated ? "workspace too large: only the first files are mirrored. " : "") +
+          (skippedLarge > 0 ? skippedLarge + " large asset(s) skipped to stay under the 96 MiB mirror budget; use typst_compile for the full document." : ""),
+        true,
+      );
     }
     return changed;
   }
@@ -428,6 +593,7 @@ export function viewerHtml(): string {
   }
 
   async function tick() {
+    if (pdfMode) return await tickPdf();
     if (document.hidden || busy || !typst) return;
     try {
       var changed = await sync(false);
@@ -480,19 +646,26 @@ export function viewerHtml(): string {
     }
     state = next;
     vfsDoc = state.doc.path;
-    seen = new Map();
-    typst.resetShadow();
-    pagesEl.innerHTML = '<div class="placeholder">loading…</div>';
+    treeEtag = null;
     renderPicker();
-    await sync(true);
-    await render();
+    if (pdfMode) {
+      await loadPdf();
+    } else {
+      seen = new Map();
+      seenBytes = new Map();
+      mirroredBytes = 0;
+      typst.resetShadow();
+      pagesEl.innerHTML = '<div class="placeholder">loading…</div>';
+      await sync(true);
+      await render();
+    }
     location.hash = "doc=" + encodeURIComponent(state.doc.path);
   }
 
   picker.addEventListener("change", function () { selectDoc(picker.value); });
   zoomEl.addEventListener("change", function () { zoom = zoomEl.value; applyZoom(); });
-  reloadButton.addEventListener("click", function () { render(); });
-  pdfButton.addEventListener("click", downloadPdf);
+  reloadButton.addEventListener("click", function () { if (pdfMode) loadPdf(); else render(); });
+  pdfButton.addEventListener("click", function () { if (pdfMode) openPdf(); else downloadPdf(); });
   document.getElementById("theme").addEventListener("click", function () {
     theme = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length];
     localStorage.setItem("pi-typst-theme", theme);
@@ -502,14 +675,14 @@ export function viewerHtml(): string {
   document.addEventListener("keydown", function (event) {
     var target = event.target;
     if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
-    if (event.key === "r") { event.preventDefault(); render(); }
+    if (event.key === "r") { event.preventDefault(); if (pdfMode) loadPdf(); else render(); }
     if (event.key === "t") { document.getElementById("theme").click(); }
-    if (event.key === "p") { event.preventDefault(); downloadPdf(); }
+    if (event.key === "p") { event.preventDefault(); if (pdfMode) openPdf(); else downloadPdf(); }
   });
 
   boot().catch(function (error) {
     var message = error && error.message ? error.message : String(error);
-    pagesEl.innerHTML = '<div class="placeholder">typst.ts failed to start</div>';
+    pagesEl.innerHTML = '<div class="placeholder">preview failed to start</div>';
     showBanner(message, false);
     setStatus("error", "boot failed");
   });

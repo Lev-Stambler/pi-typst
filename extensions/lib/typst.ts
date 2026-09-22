@@ -464,6 +464,46 @@ export function isPathInside(parent: string, child: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
+export interface PdfRender {
+  ok: boolean;
+  pdf?: Buffer;
+  diagnostics: TypstDiagnostic[];
+  stderr: string;
+  ms: number;
+}
+
+/** Compile a document to PDF bytes (written to stdout by the CLI). */
+export async function compilePdf(
+  input: string,
+  options: {
+    cwd?: string;
+    root?: string;
+    fontPaths?: string[];
+    inputs?: Record<string, string>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
+): Promise<PdfRender> {
+  const args = buildCompileArgs({
+    input,
+    output: "-",
+    format: "pdf",
+    root: options.root,
+    fontPaths: options.fontPaths,
+    inputs: options.inputs,
+    cwd: options.cwd,
+    signal: options.signal,
+  });
+  const run = await runTypst(args, { cwd: options.cwd, signal: options.signal, timeoutMs: options.timeoutMs });
+  return {
+    ok: run.ok && run.stdout.length > 0,
+    pdf: run.ok ? run.stdout : undefined,
+    diagnostics: parseDiagnostics(run.stderr),
+    stderr: run.stderr,
+    ms: run.ms,
+  };
+}
+
 export interface PngPreview {
   page: number;
   /** base64 data, no data URL prefix. */

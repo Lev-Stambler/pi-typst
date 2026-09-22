@@ -198,6 +198,10 @@ ortho(x: 65deg, y: -35deg, {
 - Caption states the takeaway, not the mechanics.
 - Colours still distinguish the roles in grayscale.
 
-If a compile fails, read only the first diagnostic and match it in
-[references/cetz-failure-modes.md](references/cetz-failure-modes.md) — Typst
-reports the earliest error, and later ones may disappear once it is fixed.
+If a compile fails, read only the first diagnostic. `typst_compile` appends a
+`Likely fix:` block for known mistakes (missing `import draw: *`, colour
+arithmetic, `mark` as a string, shadowed `text`, content arity, collinear angle
+points, unknown anchors), so try that first and only fall back to
+[references/cetz-failure-modes.md](references/cetz-failure-modes.md) for the
+rest. Typst reports the earliest error, and later ones may disappear once it is
+fixed.

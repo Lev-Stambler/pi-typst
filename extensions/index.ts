@@ -38,6 +38,7 @@ import {
 } from "./lib/typst.ts";
 import { defaultOutput, listOutputs, truncate, withTagPattern } from "./lib/outputs.ts";
 import { parsePreviewArgs } from "./lib/args.ts";
+import { diagnosticHints, formatHints } from "./lib/hints.ts";
 import { PreviewServer } from "./lib/server.ts";
 
 interface CompileDetails {  input: string;
@@ -262,7 +263,8 @@ export default function piTypstExtension(pi: ExtensionAPI): void {
       if (!run.ok) {
         const message =
           formatDiagnostics(diagnostics, { cwd: ctx.cwd }) || rawStderr(run.stderr) || `typst exited with code ${run.code}`;
-        throw new Error(`${message}\n\ncommand: ${run.command}`);
+        const hints = formatHints(diagnosticHints(diagnostics, run.stderr));
+        throw new Error([message, hints, `command: ${run.command}`].filter(Boolean).join("\n\n"));
       }
 
       const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");

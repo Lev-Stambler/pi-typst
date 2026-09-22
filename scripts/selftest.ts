@@ -32,6 +32,7 @@ import {
   runTypst,
 } from "../extensions/lib/typst.ts";
 import { parsePreviewArgs } from "../extensions/lib/args.ts";
+import { diagnosticHints, formatHints } from "../extensions/lib/hints.ts";
 import { defaultOutput, listOutputs, withTagPattern } from "../extensions/lib/outputs.ts";
 import { PreviewServer, resolveVendorRoot } from "../extensions/lib/server.ts";
 
@@ -333,6 +334,55 @@ async function main(): Promise<void> {
       assert.equal(run.ok, false);
       assert.match(run.stderr, /not found|No such file|cannot|error/i);
       return "typst reports a missing input";
+    });
+
+    await check("annotates known CeTZ mistakes with remediation hints", async () => {
+      // Synthetic diagnostics: the exact `--diagnostic-format short` lines CeTZ emits.
+      const synthetic: Array<[string, string]> = [
+        ["x.typ:3:24: error: cannot add color and ratio", "transparentize"],
+        ["x.typ:5:7: error: expected integer, found string", "dictionary"],
+        ["x.typ:6:3: error: panicked with: Failed to resolve coordinate system: [a]", "two coordinates"],
+        ["x.typ:4:31: error: cannot join array with integer", "pure function"],
+        ["x.typ:9:12: error: expected function, found content", "shadowing"],
+        ["x.typ:7:8: error: panicked with: Anchor 'north-west-up' not in anchors (\"center\",)", "Unknown anchor"],
+        ["x.typ:4:5: error: unexpected argument", "import draw"],
+        ["x.typ:1:7: error: unclosed delimiter", "Markdown-style bullet"],
+      ];
+      for (const [line, fragment] of synthetic) {
+        const hints = diagnosticHints(parseDiagnostics(line));
+        assert.ok(
+          hints.some((hint) => hint.toLowerCase().includes(fragment.toLowerCase())),
+          `no hint for "${line}" (got ${JSON.stringify(hints)})`,
+        );
+      }
+
+      // Real compiles: the hints must fire on genuine CeTZ failures.
+      const header = '#import "@preview/cetz:0.5.2": canvas, draw\n#set page(width: 6cm, height: auto)\n';
+      const cases: Array<[string, string, string]> = [
+        ["color", header + '#canvas(length: 1cm, {\n  import draw: *\n  rect((0, 0), (1, 1), fill: rgb("#dbeafe") + 50%)\n})\n', "transparentize"],
+        ["mark", header + '#canvas(length: 1cm, {\n  import draw: *\n  line((0, 0), (1, 0), mark: ">")\n})\n', "dictionary"],
+        ["import", header + "#canvas(length: 1cm, {\n  rect((0, 0), (1, 1))\n})\n", "import draw"],
+        ["content-arity", header + '#canvas(length: 1cm, {\n  import draw: *\n  content((0, 0), [a], text(8pt)[b])\n})\n', "two coordinates"],
+        [
+          "shadowing",
+          header + "#canvas(length: 1cm, {\n  import draw: *\n  let hint(y, text) = content((0, y), text(8pt, text))\n  hint(0, [x])\n})\n",
+          "shadowing",
+        ],
+      ];
+      for (const [name, source, fragment] of cases) {
+        const sourcePath = join(tmp, `hint-${name}.typ`);
+        await writeFile(sourcePath, source, "utf8");
+        const run = await runTypst(["compile", sourcePath, "--diagnostic-format", "short", join(tmp, `hint-${name}.pdf`)]);
+        assert.equal(run.ok, false, `${name}: expected the mistake to fail`);
+        const hints = diagnosticHints(parseDiagnostics(run.stderr));
+        assert.ok(
+          hints.some((hint) => hint.toLowerCase().includes(fragment.toLowerCase())),
+          `${name}: no matching hint (stderr=${run.stderr.slice(0, 160)} hints=${JSON.stringify(hints)})`,
+        );
+      }
+      assert.equal(formatHints([]), "");
+      assert.match(formatHints(diagnosticHints(parseDiagnostics("x.typ:1:1: error: unexpected argument"))), /^Likely fix:/);
+      return `${synthetic.length} synthetic + ${cases.length} real failures annotated`;
     });
 
     await check("every complete Typst example in the skills compiles", async () => {

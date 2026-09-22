@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { compilePdf, findTypFiles, formatDiagnostics, isPathInside, rawStderr, resolveTypstBinary, WORKSPACE_SKIP_DIRS } from "./typst.ts";
+import { diagnosticHints, formatHints } from "./hints.ts";
 import { viewerHtml } from "./viewer.ts";
 
 /** typst.ts release served to the browser. Keep in sync with package.json. */
@@ -493,8 +494,9 @@ export class PreviewServer {
         if (!render.ok || !render.pdf) {
           const message =
             formatDiagnostics(render.diagnostics, { cwd: this.cwd }) || rawStderr(render.stderr, 12) || "PDF export failed";
+          const hints = formatHints(diagnosticHints(render.diagnostics, render.stderr));
           response.writeHead(400, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-          response.end(message);
+          response.end([message, hints].filter(Boolean).join("\n\n"));
           return;
         }
         // HTTP header values must be latin-1: provide an ASCII fallback plus an

@@ -6,7 +6,8 @@ description: Write and debug Typst (.typ) documents with the typst_compile, typs
 # Typst documents
 
 Use the bundled tools instead of shelling out: `typst_compile` resolves the
-binary, parses diagnostics into readable errors, and returns a page image;
+binary, parses diagnostics into readable errors with `Likely fix:` hints for
+known mistakes, and returns a page image;
 `typst_preview` serves that CLI-compiled PDF live in a browser (typst.ts in the
 browser is the no-CLI fallback); `typst_cli` covers `eval`, `query`, `fonts`,
 and `init`.

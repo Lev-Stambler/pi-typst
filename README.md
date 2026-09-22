@@ -90,7 +90,11 @@ jsDelivr and the state reports `assets.mode: "cdn"`.
 | `preview_ppi` | 110 | preview resolution (capped at 200) |
 
 The tool throws on compile errors with `file:line:column: error: message`
-diagnostics, so the model sees exactly what Typst saw.
+diagnostics, so the model sees exactly what Typst saw. Known CeTZ/Typst mistakes
+(missing `import draw: *`, colour arithmetic, `mark` as a string, shadowed
+`text`, content arity, collinear angle points, unknown anchors, …) are annotated
+with a `Likely fix:` block — the same hints appear in the preview banner when a
+live PDF build fails.
 
 ### `typst_cli`
 

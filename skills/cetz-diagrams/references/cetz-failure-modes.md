@@ -37,6 +37,31 @@ CeTZ draw functions return element arrays; Typst joins a block's expression
 values. A block whose last statement is the draw call is fine — only an extra
 returned value (a number, string, coordinate) breaks it.
 
+### `error: unknown variable: canvas`
+
+```typ
+#import "@preview/cetz:0.5.2"            // ✗ imports the module as `cetz`, not `canvas`
+#canvas(length: 1cm, { ... })
+
+#import "@preview/cetz:0.5.2": canvas, draw   // ✓ named import
+#canvas(length: 1cm, {
+  import draw: *                                // ✓ and the canvas needs the draw functions
+  rect((0, 0), (1, 1))
+})
+```
+
+`#import "..."` binds the module under its file name (`cetz.canvas`, `cetz.draw`),
+so a bare `canvas` is undefined. Valid forms:
+
+```typ
+#import "@preview/cetz:0.5.2": canvas, draw          // named (recommended)
+#import "@preview/cetz:0.5.2" as cetz                // then cetz.canvas(...), cetz.draw.line(...)
+#import "@preview/cetz:0.5.2": canvas, draw, tree, angle, decorations, palette
+```
+
+The same mistake appears as `unknown variable: draw`, `tree`, `angle`,
+`decorations`, or `palette` for the other entry points.
+
 ### `error: unexpected argument`
 
 ```typ

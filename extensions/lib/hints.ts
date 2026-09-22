@@ -46,6 +46,10 @@ const RULES: HintRule[] = [
     hint: "A CeTZ helper (often angle/right-angle) received collinear or identical points. Check that the vertex really forms that angle.",
   },
   {
+    test: /unknown variable: (canvas|draw|cetz|tree|angle|decorations|palette)\b/,
+    hint: 'The CeTZ import is missing or unnamed. Import the symbols explicitly: #import "@preview/cetz:0.5.2": canvas, draw (and import draw: * inside the canvas body).',
+  },
+  {
     test: /unknown variable: [0-9a-fA-F]{6}\b/,
     hint: "A color literal is being parsed as code: the CeTZ draw call is missing `import draw: *` in this scope (and the module-level CeTZ import).",
   },

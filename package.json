@@ -1,6 +1,6 @@
 {
   "name": "pi-typst",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Typst for pi: PDF-first CLI tools, a live browser preview, and explain/illustrate skills for CeTZ diagrams",
   "keywords": [
     "pi-package",

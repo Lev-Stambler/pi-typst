@@ -346,6 +346,7 @@ async function main(): Promise<void> {
         ["x.typ:9:12: error: expected function, found content", "shadowing"],
         ["x.typ:7:8: error: panicked with: Anchor 'north-west-up' not in anchors (\"center\",)", "Unknown anchor"],
         ["x.typ:4:5: error: unexpected argument", "import draw"],
+        ["x.typ:5:1: error: unknown variable: canvas", "unnamed"],
         ["x.typ:1:7: error: unclosed delimiter", "Markdown-style bullet"],
       ];
       for (const [line, fragment] of synthetic) {
@@ -362,6 +363,11 @@ async function main(): Promise<void> {
         ["color", header + '#canvas(length: 1cm, {\n  import draw: *\n  rect((0, 0), (1, 1), fill: rgb("#dbeafe") + 50%)\n})\n', "transparentize"],
         ["mark", header + '#canvas(length: 1cm, {\n  import draw: *\n  line((0, 0), (1, 0), mark: ">")\n})\n', "dictionary"],
         ["import", header + "#canvas(length: 1cm, {\n  rect((0, 0), (1, 1))\n})\n", "import draw"],
+        [
+          "unnamed-import",
+          '#import "@preview/cetz:0.5.2"\n#set page(width: 6cm, height: auto)\n#canvas(length: 1cm, {\n  import draw: *\n  rect((0, 0), (1, 1))\n})\n',
+          "unnamed",
+        ],
         ["content-arity", header + '#canvas(length: 1cm, {\n  import draw: *\n  content((0, 0), [a], text(8pt)[b])\n})\n', "two coordinates"],
         [
           "shadowing",

@@ -70,11 +70,20 @@ Pin `@preview/cetz:0.5.2`. The first compile downloads the package (network
 once). For data plots use `#import "@preview/cetz-plot:0.1.3": plot` — plotting
 moved out of CeTZ in 0.4.
 
-**Both imports matter in every module and nested scope.** A helper module that
-draws needs `#import "@preview/cetz:0.5.2": draw` at module level, and the
-canvas body needs `import draw: *`; otherwise names resolve to Typst built-ins
-and the error messages point at arguments (`unexpected argument`,
-`unknown variable: dbeafe`) instead of the missing import.
+**Both imports matter in every module and nested scope.** The three valid forms:
+
+```typ
+#import "@preview/cetz:0.5.2": canvas, draw        // named symbols (recommended)
+#import "@preview/cetz:0.5.2" as cetz              // then cetz.canvas(...), cetz.draw.line(...)
+#import "@preview/cetz:0.5.2": canvas, draw, tree  // add libraries as needed
+```
+
+A helper module that draws needs the module-level import, and the canvas body
+needs `import draw: *`. A bare `#import "@preview/cetz:0.5.2"` binds the module
+as `cetz` only — `#canvas(...)` then fails with `unknown variable: canvas` — and
+without `import draw: *` the draw names resolve to Typst built-ins, so the error
+points at the arguments (`unexpected argument`, `unknown variable: dbeafe`)
+instead of the import.
 
 ## Pre-flight checklist
 

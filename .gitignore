@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+.tsbuildinfo
+dist/
+.tmp/
+.DS_Store
+# generated renders (sources are the product)
+*.pdf
+*.svg
+*.png
+!media/**/*.png
+.pi/
